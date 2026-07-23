@@ -1,0 +1,14 @@
+Django<6.0,>=5.0
+djangorestframework<4.0,>=3.15
+djangorestframework-simplejwt<6.0,>=5.3
+django-filter<26.0,>=24.0
+psycopg[binary]<4.0,>=3.1
+python-dotenv<2.0,>=1.0
+
+[dev]
+pytest<9.0,>=8.0
+pytest-django<5.0,>=4.8
+pytest-cov<7.0,>=5.0
+ruff<1.0,>=0.6
+mypy<2.0,>=1.10
+django-stubs[compatible-mypy]<6.0,>=5.0

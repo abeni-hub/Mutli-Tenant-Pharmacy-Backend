@@ -1,0 +1,1 @@
+"""Pharmacy product catalog."""

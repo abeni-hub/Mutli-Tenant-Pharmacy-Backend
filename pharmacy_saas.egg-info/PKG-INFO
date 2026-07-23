@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: pharmacy-saas
+Version: 0.1.0
+Summary: Multi-tenant pharmacy management SaaS backend
+Requires-Python: >=3.12
+Requires-Dist: Django<6.0,>=5.0
+Requires-Dist: djangorestframework<4.0,>=3.15
+Requires-Dist: djangorestframework-simplejwt<6.0,>=5.3
+Requires-Dist: django-filter<26.0,>=24.0
+Requires-Dist: psycopg[binary]<4.0,>=3.1
+Requires-Dist: python-dotenv<2.0,>=1.0
+Provides-Extra: dev
+Requires-Dist: pytest<9.0,>=8.0; extra == "dev"
+Requires-Dist: pytest-django<5.0,>=4.8; extra == "dev"
+Requires-Dist: pytest-cov<7.0,>=5.0; extra == "dev"
+Requires-Dist: ruff<1.0,>=0.6; extra == "dev"
+Requires-Dist: mypy<2.0,>=1.10; extra == "dev"
+Requires-Dist: django-stubs[compatible-mypy]<6.0,>=5.0; extra == "dev"
