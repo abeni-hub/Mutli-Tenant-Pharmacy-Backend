@@ -31,3 +31,6 @@ customers.
 The API version prefix is `/api/v1/`. Authentication uses JWT access and
 refresh tokens. The database, secret key, allowed hosts, and token lifetimes
 are environment-driven.
+
+First Test for Authentication
+![alt text](image.png)
