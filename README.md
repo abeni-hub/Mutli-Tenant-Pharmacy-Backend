@@ -119,3 +119,8 @@ Payment Approval
 http://localhost:8000/api/v1/subscriptions/payment-requests/8eed976b-72be-41a6-a9d2-cda02be8283f/approve/
 ![alt text](image-8.png)
 
+
+Get Inventory of Tenant
+http://localhost:8000/api/v1/inventory/batches/
+![alt text](image-9.png)
+http://localhost:8000/api/v1/inventory/items/
