@@ -23,7 +23,7 @@ class TenantApiTests(APITestCase):
 
     def authenticate(self, email: str, password: str) -> None:
         response = self.client.post(
-            "/api/v1/auth/token/",
+            "/api/v1/auth/login/",
             {"email": email, "password": password},
             format="json",
         )
@@ -91,7 +91,7 @@ class TenantApiTests(APITestCase):
     def test_staff_can_read_products_only_in_active_tenant(self) -> None:
         tenant = Tenant.objects.create(name="Staff Pharmacy", slug="staff")
         Membership.objects.create(
-            tenant=tenant, user=self.user, role=Membership.Role.STAFF
+            tenant=tenant, user=self.user, role=Membership.Role.CASHIER
         )
         product = Product.objects.create(
             tenant=tenant, name="Staff Medicine", sku="STAFF-1"

@@ -36,7 +36,73 @@ First Test for Authentication of Tenants and  others
 ![alt text](image.png)
 
 Register a User(Owner) 
+
+01. Register Users:
+
+POST http://localhost:8000/api/v1/auth/register/
+
+{
+  "email": "owner@abeni.test",
+  "password": "SecurePassword123!",
+  "first_name": "Almaz",
+  "last_name": "Tadesse",
+  "phone_number": "+251911000001"
+}
+
+Repeat for manager, cashier, inventory, pharmacist, accountant, superadmin
 ![alt text](image-1.png)
+
+02. Login:
+
+POST http://localhost:8000/api/v1/auth/login/
+
+{
+  "email": "owner@abeni.test",
+  "password": "SecurePassword123!"
+}
+
+Receive access & refresh tokens
+Use access token for protected endpoints
 
 Loign with Created User
 ![alt text](image-2.png)
+
+03. Profile & Role Verification:
+
+GET http://localhost:8000/api/v1/auth/me/
+
+![alt text](image-3.png)
+
+
+04. Logout (Token Blacklist):
+
+POST http://localhost:8000/api/v1/auth/logout/
+
+{
+  "refresh": "<refresh_token>"
+}
+
+
+05. Token Refresh:
+
+POST http://localhost:8000/api/v1/auth/token/refresh/
+
+{
+  "refresh": "<refresh_token>"
+}
+
+
+06. Password Reset:
+
+POST http://localhost:8000/api/v1/auth/password/reset/ with {"email": "owner@abeni.test"}
+POST http://localhost:8000/api/v1/auth/password/confirm/ with token UUID
+
+07. Login Audit History:
+
+GET http://localhost:8000/api/v1/auth/login-history/
+
+
+
+Subscription Model
+
+![alt text](image-4.png)

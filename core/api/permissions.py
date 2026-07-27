@@ -192,3 +192,92 @@ class IsAnyStaff(TenantRolePermission):
         Membership.Role.SUPER_ADMIN,
     )
     message = "Active tenant membership required."
+
+
+# ── Subscription permissions & feature gates ─────────────────────────────────
+
+class HasActiveSubscription(BasePermission):
+    """
+    Enforces that the current tenant has an active, non-expired subscription.
+    Safe HTTP methods (GET, HEAD, OPTIONS) are allowed if read-only access is desired,
+    or write operations are blocked if subscription is expired.
+    """
+    message = "An active subscription is required to perform this action."
+
+    def has_permission(self, request, view) -> bool:
+        if request.user.is_superuser:
+            return True
+
+        tenant_id = getattr(request, "tenant_id", None)
+        if tenant_id is None:
+            return True  # Handled by TenantMembershipPermission
+
+        from apps.tenants.models import Tenant
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+        except Tenant.DoesNotExist:
+            return False
+
+        sub = getattr(tenant, "subscription", None)
+        if sub is None or sub.is_expired:
+            return False
+
+        return True
+
+
+class RequiresReportsFeature(BasePermission):
+    """Requires tenant plan to have `has_reports=True`."""
+    message = "The Reports feature is not included in your current subscription plan."
+
+    def has_permission(self, request, view) -> bool:
+        if request.user.is_superuser:
+            return True
+        tenant_id = getattr(request, "tenant_id", None)
+        if not tenant_id:
+            return False
+        from apps.tenants.models import Tenant
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+            sub = getattr(tenant, "subscription", None)
+            return sub is not None and not sub.is_expired and sub.plan.has_reports
+        except Tenant.DoesNotExist:
+            return False
+
+
+class RequiresSMSFeature(BasePermission):
+    """Requires tenant plan to have `has_sms=True`."""
+    message = "The SMS feature is not included in your current subscription plan."
+
+    def has_permission(self, request, view) -> bool:
+        if request.user.is_superuser:
+            return True
+        tenant_id = getattr(request, "tenant_id", None)
+        if not tenant_id:
+            return False
+        from apps.tenants.models import Tenant
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+            sub = getattr(tenant, "subscription", None)
+            return sub is not None and not sub.is_expired and sub.plan.has_sms
+        except Tenant.DoesNotExist:
+            return False
+
+
+class RequiresBackupsFeature(BasePermission):
+    """Requires tenant plan to have `has_backups=True`."""
+    message = "The Backups feature is not included in your current subscription plan."
+
+    def has_permission(self, request, view) -> bool:
+        if request.user.is_superuser:
+            return True
+        tenant_id = getattr(request, "tenant_id", None)
+        if not tenant_id:
+            return False
+        from apps.tenants.models import Tenant
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+            sub = getattr(tenant, "subscription", None)
+            return sub is not None and not sub.is_expired and sub.plan.has_backups
+        except Tenant.DoesNotExist:
+            return False
+
