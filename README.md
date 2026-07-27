@@ -90,3 +90,13 @@ POST http://localhost:8000/api/v1/auth/token/refresh/
 {
   "refresh": "<refresh_token>"
 }
+
+
+06. Password Reset:
+
+POST http://localhost:8000/api/v1/auth/password/reset/ with {"email": "owner@abeni.test"}
+POST http://localhost:8000/api/v1/auth/password/confirm/ with token UUID
+
+07. Login Audit History:
+
+GET http://localhost:8000/api/v1/auth/login-history/
