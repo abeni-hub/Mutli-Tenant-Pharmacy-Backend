@@ -28,6 +28,20 @@ router.register("tenant-context", TenantContextViewSet, basename="tenant-context
 # ── Catalog ───────────────────────────────────────────────────────────────────
 router.register("products", ProductViewSet, basename="product")
 
+# ── Subscriptions ─────────────────────────────────────────────────────────────
+from apps.subscriptions.views import (
+    PaymentRequestViewSet,
+    SubscriptionNotificationViewSet,
+    SubscriptionPlanViewSet,
+    TenantSubscriptionViewSet,
+)
+
+router.register("subscriptions/plans", SubscriptionPlanViewSet, basename="subscription-plan")
+router.register("subscriptions/current", TenantSubscriptionViewSet, basename="subscription-current")
+router.register("subscriptions/payment-requests", PaymentRequestViewSet, basename="subscription-payment-request")
+router.register("subscriptions/notifications", SubscriptionNotificationViewSet, basename="subscription-notification")
+
+
 app_name = "v1"
 
 urlpatterns = [

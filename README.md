@@ -100,3 +100,9 @@ POST http://localhost:8000/api/v1/auth/password/confirm/ with token UUID
 07. Login Audit History:
 
 GET http://localhost:8000/api/v1/auth/login-history/
+
+
+
+Subscription Model
+
+![alt text](image-4.png)
