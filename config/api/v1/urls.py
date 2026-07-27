@@ -47,6 +47,11 @@ from apps.inventory.views import InventoryLogViewSet, StockBatchViewSet
 router.register("inventory/batches", StockBatchViewSet, basename="inventory-batch")
 router.register("inventory/logs", InventoryLogViewSet, basename="inventory-log")
 
+# ── Sales ─────────────────────────────────────────────────────────────────────
+from apps.sales.views import SaleViewSet
+
+router.register("sales", SaleViewSet, basename="sale")
+
 
 app_name = "v1"
 
