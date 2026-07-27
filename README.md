@@ -34,3 +34,9 @@ are environment-driven.
 
 First Test for Authentication of Tenants and  others 
 ![alt text](image.png)
+
+Register a User(Owner) 
+![alt text](image-1.png)
+
+Loign with Created User
+![alt text](image-2.png)

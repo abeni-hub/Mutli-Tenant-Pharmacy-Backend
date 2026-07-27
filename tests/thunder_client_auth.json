@@ -1,0 +1,380 @@
+{
+  "clientName": "Thunder Client",
+  "collectionName": "Abeni Pharmacy — Auth Phase 3",
+  "dateExported": "2026-07-27",
+  "version": "1.1",
+  "folders": [
+    {
+      "_id": "folder-01-register",
+      "name": "01. Register Users",
+      "containerId": ""
+    },
+    {
+      "_id": "folder-02-login",
+      "name": "02. Login (All Roles)",
+      "containerId": ""
+    },
+    {
+      "_id": "folder-03-token",
+      "name": "03. Token Operations",
+      "containerId": ""
+    },
+    {
+      "_id": "folder-04-password",
+      "name": "04. Password Reset",
+      "containerId": ""
+    },
+    {
+      "_id": "folder-05-profile",
+      "name": "05. Profile (Me)",
+      "containerId": ""
+    },
+    {
+      "_id": "folder-06-tenant",
+      "name": "06. Tenant Setup",
+      "containerId": ""
+    },
+    {
+      "_id": "folder-07-history",
+      "name": "07. Login History",
+      "containerId": ""
+    },
+    {
+      "_id": "folder-08-security",
+      "name": "08. Security Tests",
+      "containerId": ""
+    }
+  ],
+  "requests": [
+    {
+      "_id": "req-register-owner",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-01-register",
+      "name": "Register — Owner",
+      "url": "http://localhost:8000/api/v1/auth/register/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"owner@abeni.test\",\n  \"password\": \"SecurePass@123\",\n  \"first_name\": \"Almaz\",\n  \"last_name\": \"Tadesse\",\n  \"phone_number\": \"+251911000001\"\n}"
+      }
+    },
+    {
+      "_id": "req-register-manager",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-01-register",
+      "name": "Register — Manager",
+      "url": "http://localhost:8000/api/v1/auth/register/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"manager@abeni.test\",\n  \"password\": \"SecurePass@123\",\n  \"first_name\": \"Bekele\",\n  \"last_name\": \"Girma\",\n  \"phone_number\": \"+251911000002\"\n}"
+      }
+    },
+    {
+      "_id": "req-register-cashier",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-01-register",
+      "name": "Register — Cashier",
+      "url": "http://localhost:8000/api/v1/auth/register/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"cashier@abeni.test\",\n  \"password\": \"SecurePass@123\",\n  \"first_name\": \"Chaltu\",\n  \"last_name\": \"Feyisa\"\n}"
+      }
+    },
+    {
+      "_id": "req-register-inventory",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-01-register",
+      "name": "Register — Inventory Manager",
+      "url": "http://localhost:8000/api/v1/auth/register/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"inventory@abeni.test\",\n  \"password\": \"SecurePass@123\",\n  \"first_name\": \"Dereje\",\n  \"last_name\": \"Wolde\"\n}"
+      }
+    },
+    {
+      "_id": "req-register-pharmacist",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-01-register",
+      "name": "Register — Pharmacist",
+      "url": "http://localhost:8000/api/v1/auth/register/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"pharmacist@abeni.test\",\n  \"password\": \"SecurePass@123\",\n  \"first_name\": \"Eyerusalem\",\n  \"last_name\": \"Haile\"\n}"
+      }
+    },
+    {
+      "_id": "req-register-accountant",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-01-register",
+      "name": "Register — Accountant",
+      "url": "http://localhost:8000/api/v1/auth/register/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"accountant@abeni.test\",\n  \"password\": \"SecurePass@123\",\n  \"first_name\": \"Fikre\",\n  \"last_name\": \"Abebe\"\n}"
+      }
+    },
+    {
+      "_id": "req-register-superadmin",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-01-register",
+      "name": "Register — Super Admin",
+      "url": "http://localhost:8000/api/v1/auth/register/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"superadmin@abeni.test\",\n  \"password\": \"SecurePass@123\",\n  \"first_name\": \"Genet\",\n  \"last_name\": \"Bekele\"\n}"
+      }
+    },
+    {
+      "_id": "req-register-duplicate",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-01-register",
+      "name": "Register — Duplicate Email (fail 400)",
+      "url": "http://localhost:8000/api/v1/auth/register/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"owner@abeni.test\",\n  \"password\": \"SecurePass@123\",\n  \"first_name\": \"Duplicate\",\n  \"last_name\": \"Test\"\n}"
+      }
+    },
+    {
+      "_id": "req-register-weak-pw",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-01-register",
+      "name": "Register — Weak Password (fail 400)",
+      "url": "http://localhost:8000/api/v1/auth/register/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"weakpw@abeni.test\",\n  \"password\": \"short\",\n  \"first_name\": \"Weak\",\n  \"last_name\": \"Pass\"\n}"
+      }
+    },
+    {
+      "_id": "req-login-owner",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-02-login",
+      "name": "Login — Owner",
+      "url": "http://localhost:8000/api/v1/auth/login/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"owner@abeni.test\",\n  \"password\": \"SecurePass@123\"\n}"
+      }
+    },
+    {
+      "_id": "req-login-manager",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-02-login",
+      "name": "Login — Manager",
+      "url": "http://localhost:8000/api/v1/auth/login/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"manager@abeni.test\",\n  \"password\": \"SecurePass@123\"\n}"
+      }
+    },
+    {
+      "_id": "req-login-cashier",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-02-login",
+      "name": "Login — Cashier",
+      "url": "http://localhost:8000/api/v1/auth/login/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"cashier@abeni.test\",\n  \"password\": \"SecurePass@123\"\n}"
+      }
+    },
+    {
+      "_id": "req-login-inventory",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-02-login",
+      "name": "Login — Inventory Manager",
+      "url": "http://localhost:8000/api/v1/auth/login/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"inventory@abeni.test\",\n  \"password\": \"SecurePass@123\"\n}"
+      }
+    },
+    {
+      "_id": "req-login-pharmacist",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-02-login",
+      "name": "Login — Pharmacist",
+      "url": "http://localhost:8000/api/v1/auth/login/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"pharmacist@abeni.test\",\n  \"password\": \"SecurePass@123\"\n}"
+      }
+    },
+    {
+      "_id": "req-login-accountant",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-02-login",
+      "name": "Login — Accountant",
+      "url": "http://localhost:8000/api/v1/auth/login/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"accountant@abeni.test\",\n  \"password\": \"SecurePass@123\"\n}"
+      }
+    },
+    {
+      "_id": "req-login-superadmin",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-02-login",
+      "name": "Login — Super Admin",
+      "url": "http://localhost:8000/api/v1/auth/login/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"superadmin@abeni.test\",\n  \"password\": \"SecurePass@123\"\n}"
+      }
+    },
+    {
+      "_id": "req-login-wrong-pw",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-02-login",
+      "name": "Login — Wrong Password (fail 401)",
+      "url": "http://localhost:8000/api/v1/auth/login/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"owner@abeni.test\",\n  \"password\": \"WrongPassword\"\n}"
+      }
+    },
+    {
+      "_id": "req-token-refresh",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-03-token",
+      "name": "Refresh Token",
+      "url": "http://localhost:8000/api/v1/auth/token/refresh/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"refresh\": \"<PASTE_REFRESH_TOKEN_HERE>\"\n}"
+      }
+    },
+    {
+      "_id": "req-logout",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-03-token",
+      "name": "Logout (Blacklist Refresh Token)",
+      "url": "http://localhost:8000/api/v1/auth/logout/",
+      "method": "POST",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer <PASTE_ACCESS_TOKEN_HERE>" }
+      ],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"refresh\": \"<PASTE_REFRESH_TOKEN_TO_BLACKLIST>\"\n}"
+      }
+    },
+    {
+      "_id": "req-pw-reset-request",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-04-password",
+      "name": "Request Password Reset",
+      "url": "http://localhost:8000/api/v1/auth/password/reset/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"owner@abeni.test\"\n}"
+      }
+    },
+    {
+      "_id": "req-pw-reset-confirm",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-04-password",
+      "name": "Confirm Password Reset",
+      "url": "http://localhost:8000/api/v1/auth/password/confirm/",
+      "method": "POST",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"token\": \"<TOKEN_UUID_FROM_CONSOLE>\",\n  \"new_password\": \"NewSecurePass@456\",\n  \"confirm_password\": \"NewSecurePass@456\"\n}"
+      }
+    },
+    {
+      "_id": "req-me-get",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-05-profile",
+      "name": "GET Profile (Me)",
+      "url": "http://localhost:8000/api/v1/auth/me/",
+      "method": "GET",
+      "headers": [
+        { "name": "Authorization", "value": "Bearer <PASTE_ACCESS_TOKEN_HERE>" }
+      ]
+    },
+    {
+      "_id": "req-me-update",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-05-profile",
+      "name": "PATCH Update Profile",
+      "url": "http://localhost:8000/api/v1/auth/me/profile/",
+      "method": "PATCH",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer <PASTE_ACCESS_TOKEN_HERE>" }
+      ],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"first_name\": \"Almaz Updated\",\n  \"phone_number\": \"+251922000001\"\n}"
+      }
+    },
+    {
+      "_id": "req-tenant-create",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-06-tenant",
+      "name": "Create Tenant (as Owner)",
+      "url": "http://localhost:8000/api/v1/tenants/",
+      "method": "POST",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer <PASTE_OWNER_ACCESS_TOKEN_HERE>" }
+      ],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"name\": \"Abeni Pharmacy Addis\",\n  \"registration_number\": \"ETH-PHARM-001\"\n}"
+      }
+    },
+    {
+      "_id": "req-history-own",
+      "colId": "abeni-auth-collection-001",
+      "containerId": "folder-07-history",
+      "name": "My Login History",
+      "url": "http://localhost:8000/api/v1/auth/login-history/",
+      "method": "GET",
+      "headers": [
+        { "name": "Authorization", "value": "Bearer <PASTE_ACCESS_TOKEN_HERE>" }
+      ]
+    }
+  ]
+}
