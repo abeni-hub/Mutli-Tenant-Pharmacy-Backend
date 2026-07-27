@@ -106,3 +106,7 @@ GET http://localhost:8000/api/v1/auth/login-history/
 Subscription Model
 
 ![alt text](image-4.png)
+
+GET - http://localhost:8000//api/v1/subscriptions/plans/
+
+![alt text](image-5.png)
