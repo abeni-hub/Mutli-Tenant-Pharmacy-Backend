@@ -32,33 +32,33 @@ The API version prefix is `/api/v1/`. Authentication uses JWT access and
 refresh tokens. The database, secret key, allowed hosts, and token lifetimes
 are environment-driven.
 
-First Test for Authentication of Tenants and  others 
+First Test for Authentication of Tenants and others
 ![alt text](image.png)
 
-Register a User(Owner) 
+Register a User(Owner)
 
-01. Register Users:
+1.  Register Users:
 
 POST http://localhost:8000/api/v1/auth/register/
 
 {
-  "email": "owner@abeni.test",
-  "password": "SecurePassword123!",
-  "first_name": "Almaz",
-  "last_name": "Tadesse",
-  "phone_number": "+251911000001"
+"email": "owner@abeni.test",
+"password": "SecurePassword123!",
+"first_name": "Almaz",
+"last_name": "Tadesse",
+"phone_number": "+251911000001"
 }
 
 Repeat for manager, cashier, inventory, pharmacist, accountant, superadmin
 ![alt text](image-1.png)
 
-02. Login:
+2.  Login:
 
 POST http://localhost:8000/api/v1/auth/login/
 
 {
-  "email": "owner@abeni.test",
-  "password": "SecurePassword123!"
+"email": "owner@abeni.test",
+"password": "SecurePassword123!"
 }
 
 Receive access & refresh tokens
@@ -67,42 +67,55 @@ Use access token for protected endpoints
 Loign with Created User
 ![alt text](image-2.png)
 
-03. Profile & Role Verification:
+3.  Profile & Role Verification:
 
 GET http://localhost:8000/api/v1/auth/me/
 
 ![alt text](image-3.png)
 
-
-04. Logout (Token Blacklist):
+4.  Logout (Token Blacklist):
 
 POST http://localhost:8000/api/v1/auth/logout/
 
 {
-  "refresh": "<refresh_token>"
+"refresh": "<refresh_token>"
 }
 
-
-05. Token Refresh:
+5.  Token Refresh:
 
 POST http://localhost:8000/api/v1/auth/token/refresh/
 
 {
-  "refresh": "<refresh_token>"
+"refresh": "<refresh_token>"
 }
 
-
-06. Password Reset:
+6.  Password Reset:
 
 POST http://localhost:8000/api/v1/auth/password/reset/ with {"email": "owner@abeni.test"}
 POST http://localhost:8000/api/v1/auth/password/confirm/ with token UUID
 
-07. Login Audit History:
+7.  Login Audit History:
 
 GET http://localhost:8000/api/v1/auth/login-history/
-
-
 
 Subscription Model
 
 ![alt text](image-4.png)
+
+GET - http://localhost:8000//api/v1/subscriptions/plans/
+
+![alt text](image-5.png)
+
+Adding Branches and Tenants
+http://localhost:8000/api/v1/tenants/
+![alt text](image-7.png)
+
+Payment Process and Payment Verification
+http://localhost:8000/api/v1/subscriptions/payment-requests/
+![alt text](image-6.png)
+
+
+Payment Approval
+http://localhost:8000/api/v1/subscriptions/payment-requests/8eed976b-72be-41a6-a9d2-cda02be8283f/approve/
+![alt text](image-8.png)
+

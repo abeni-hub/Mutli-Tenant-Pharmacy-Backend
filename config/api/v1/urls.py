@@ -41,6 +41,12 @@ router.register("subscriptions/current", TenantSubscriptionViewSet, basename="su
 router.register("subscriptions/payment-requests", PaymentRequestViewSet, basename="subscription-payment-request")
 router.register("subscriptions/notifications", SubscriptionNotificationViewSet, basename="subscription-notification")
 
+# ── Inventory ─────────────────────────────────────────────────────────────────
+from apps.inventory.views import InventoryLogViewSet, StockBatchViewSet
+
+router.register("inventory/batches", StockBatchViewSet, basename="inventory-batch")
+router.register("inventory/logs", InventoryLogViewSet, basename="inventory-log")
+
 
 app_name = "v1"
 

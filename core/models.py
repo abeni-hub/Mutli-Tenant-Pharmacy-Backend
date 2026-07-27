@@ -29,6 +29,8 @@ class TenantScopedModel(UUIDModel):
             return super().get_queryset().filter(tenant_id=require_tenant_id())
 
     objects = TenantScopedManager()
+    unscoped = models.Manager()
 
     class Meta:
         abstract = True
+
