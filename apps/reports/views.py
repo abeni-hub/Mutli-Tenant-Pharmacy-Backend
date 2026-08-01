@@ -101,6 +101,18 @@ class ReportViewSet(viewsets.ViewSet):
         data = ReportService.get_inventory_valuation(tenant)
         return Response(data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["get"], url_path="alerts")
+    def alerts(self, request):
+        tenant = self._get_tenant(request)
+        days_param = request.query_params.get("days", "30")
+        try:
+            days = int(days_param)
+        except (TypeError, ValueError):
+            days = 30
+
+        data = ReportService.get_inventory_alerts(tenant=tenant, days=days)
+        return Response(data, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=["get"], url_path="charts")
     def charts(self, request):
         tenant = self._get_tenant(request)

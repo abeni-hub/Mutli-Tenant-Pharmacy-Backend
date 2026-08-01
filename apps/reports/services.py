@@ -358,6 +358,66 @@ class ReportService:
         }
 
     @staticmethod
+    def get_inventory_alerts(tenant: Tenant, days: int = 30) -> dict[str, Any]:
+        """Return inventory risk alerts for low stock and near-expiry batches."""
+        today = timezone.now().date()
+        threshold_date = today + timedelta(days=days)
+
+        products = Product.unscoped.filter(tenant=tenant, is_active=True)
+        low_stock = []
+        for product in products:
+            total_stock = (
+                StockBatch.unscoped.filter(
+                    tenant=tenant,
+                    product=product,
+                    is_active=True,
+                    quantity__gt=0,
+                    expiry_date__gt=today,
+                ).aggregate(total=Sum("quantity"))["total"]
+                or 0
+            )
+            if total_stock <= product.reorder_level:
+                low_stock.append(
+                    {
+                        "product_id": product.id,
+                        "product_name": product.name,
+                        "sku": product.sku,
+                        "current_stock": total_stock,
+                        "reorder_level": product.reorder_level,
+                        "status": "Low Stock",
+                    }
+                )
+
+        near_expiry = []
+        batches = StockBatch.unscoped.filter(
+            tenant=tenant,
+            is_active=True,
+            quantity__gt=0,
+            expiry_date__gt=today,
+            expiry_date__lte=threshold_date,
+        ).order_by("expiry_date")
+
+        for batch in batches:
+            near_expiry.append(
+                {
+                    "batch_id": batch.id,
+                    "batch_number": batch.batch_number,
+                    "product_id": batch.product.id,
+                    "product_name": batch.product.name,
+                    "sku": batch.product.sku,
+                    "quantity": batch.quantity,
+                    "expiry_date": batch.expiry_date,
+                    "days_to_expiry": (batch.expiry_date - today).days,
+                }
+            )
+
+        return {
+            "low_stock": low_stock,
+            "near_expiry": near_expiry,
+            "window_days": days,
+        }
+
+    @staticmethod
     def get_charts_data(
         tenant: Tenant,
         period: str = "monthly",

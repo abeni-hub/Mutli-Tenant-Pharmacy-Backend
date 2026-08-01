@@ -172,6 +172,36 @@ class TestReportsSystem:
         assert "revenue" in data["datasets"]
         assert "profit" in data["datasets"]
 
+    def test_07_inventory_alerts(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.owner_token}")
+        alert_product = Product.objects.create(
+            tenant=self.tenant,
+            name="Amoxicillin 250mg",
+            sku="AMX-250",
+            reorder_level=10,
+        )
+        InventoryService.stock_in(
+            tenant=self.tenant,
+            product=alert_product,
+            batch_number="B-AMX-001",
+            quantity=3,
+            expiry_date=timezone.now().date() + timedelta(days=5),
+            unit_price=1.50,
+            selling_price=3.00,
+            performed_by=self.owner,
+        )
+
+        res = self.client.get(
+            "/api/v1/reports/alerts/?days=30",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        assert res.status_code == 200, res.data
+        data = res.data
+        assert "low_stock" in data
+        assert "near_expiry" in data
+        assert any(item["product_name"] == "Amoxicillin 250mg" for item in data["low_stock"])
+        assert any(item["product_name"] == "Amoxicillin 250mg" for item in data["near_expiry"])
+
     def _get_token(self, user: User) -> str:
         login_res = self.client.post(
             "/api/v1/auth/login/",
