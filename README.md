@@ -114,13 +114,37 @@ Payment Process and Payment Verification
 http://localhost:8000/api/v1/subscriptions/payment-requests/
 ![alt text](image-6.png)
 
-
 Payment Approval
 http://localhost:8000/api/v1/subscriptions/payment-requests/8eed976b-72be-41a6-a9d2-cda02be8283f/approve/
 ![alt text](image-8.png)
 
+Add Products
+http://localhost:8000/api/v1/products/
+![alt text](image-10.png)
 
 Get Inventory of Tenant
 http://localhost:8000/api/v1/inventory/batches/
+
+POST - http://localhost:8000/api/v1/inventory/batches/stock-in/
+![alt text](image-11.png)
 ![alt text](image-9.png)
 http://localhost:8000/api/v1/inventory/items/
+
+
+
+
+Sales API
+http://localhost:8000/api/v1/sales/
+![alt text](image-12.png)
+## Phase 7: Reports & Analytics
+
+The `apps.reports` app provides real-time dashboard analytics and financial reporting:
+
+- `GET /api/v1/reports/dashboard/` — Overview KPI summary cards
+- `GET /api/v1/reports/financial/` — Financial breakdown (daily/weekly/monthly/yearly)
+- `GET /api/v1/reports/cashier-performance/` — Cashier sales ranking & performance
+- `GET /api/v1/reports/product-performance/` — Top & Slow medicines classification
+- `GET /api/v1/reports/inventory-valuation/` — Inventory asset valuation & stock stats
+- `GET /api/v1/reports/charts/` — Formatted time-series chart data
+
+For full request and response payload documentation (including Product creation, Stock In, FIFO Stock Out, Stock Adjustment, Sales Checkout, Sale Cancellation, Item Refunds, and Reports), see [API_REFERENCE.md](file:///d:/Abeni%20Nest/Multi-Tenant/API_REFERENCE.md).

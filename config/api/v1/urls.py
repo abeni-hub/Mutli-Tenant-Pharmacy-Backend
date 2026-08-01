@@ -52,6 +52,12 @@ from apps.sales.views import SaleViewSet
 
 router.register("sales", SaleViewSet, basename="sale")
 
+# ── Reports & Analytics ───────────────────────────────────────────────────────
+from apps.reports.views import ReportViewSet
+
+router.register("reports", ReportViewSet, basename="report")
+
+
 
 app_name = "v1"
 

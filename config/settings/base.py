@@ -7,10 +7,12 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.environ.get(
-    "DJANGO_SECRET_KEY",
-    "development-only-secret-key-change-this-before-deployment-1234567890",
-)
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+if not SECRET_KEY or len(SECRET_KEY.encode("utf-8")) < 32:
+    SECRET_KEY = (
+        "development-only-secret-key-change-this-before-deployment-"
+        "please-use-32-plus-bytes-for-jwt-signing"
+    )
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
 ALLOWED_HOSTS = [
     host for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",") if host
@@ -34,6 +36,7 @@ INSTALLED_APPS = [
     "apps.sales",
     "apps.tenants",
     "apps.subscriptions",
+    "apps.reports",
 ]
 
 MIDDLEWARE = [
