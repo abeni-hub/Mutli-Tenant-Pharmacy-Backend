@@ -63,14 +63,21 @@ app_name = "v1"
 
 urlpatterns = [
     # JWT — obtain / refresh / logout
-    path("auth/login/", LoginView.as_view(), name="auth-login"),
-    path("auth/logout/", LogoutView.as_view(), name="auth-logout"),
-    path("auth/token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
+    path("auth/login", LoginView.as_view(), name="auth-login"),
+    path("auth/login/", LoginView.as_view(), name="auth-login-slash"),
+    path("auth/logout", LogoutView.as_view(), name="auth-logout"),
+    path("auth/logout/", LogoutView.as_view(), name="auth-logout-slash"),
+    path("auth/token/refresh", TokenRefreshView.as_view(), name="token-refresh"),
+    path("auth/token/refresh/", TokenRefreshView.as_view(), name="token-refresh-slash"),
 
     # Password reset
     path("auth/password/reset/", PasswordResetRequestView.as_view(), name="password-reset-request"),
     path("auth/password/confirm/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
 
     # Router-based endpoints
+    # Support no-trailing-slash for router-registered auth/me and tenants
+    path("auth/me", MeViewSet.as_view({"get": "list"}), name="auth-me-noslash"),
+    path("tenants", TenantViewSet.as_view({"get": "list", "post": "create"}), name="tenant-noslash"),
+
     path("", include(router.urls)),
 ]

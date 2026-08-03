@@ -61,6 +61,27 @@ class TestAuthSystemAllRoles:
         # Check LoginHistory logged
         assert LoginHistory.objects.filter(email_attempted="owner@abeni.test", success=True).exists()
 
+    def test_02b_login_without_trailing_slash(self):
+        self.client.post(
+            "/api/v1/auth/register/",
+            {
+                "email": "login-noslash@abeni.test",
+                "password": "SecurePassword123!",
+                "first_name": "Login",
+                "last_name": "NoSlash",
+            },
+            format="json",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/login",
+            {"email": "login-noslash@abeni.test", "password": "SecurePassword123!"},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert "access" in response.data
+
     def test_03_token_logout_blacklist(self):
         # Register & Login
         self.client.post(
