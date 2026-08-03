@@ -75,5 +75,9 @@ urlpatterns = [
     path("auth/password/confirm/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
 
     # Router-based endpoints
+    # Support no-trailing-slash for router-registered auth/me and tenants
+    path("auth/me", MeViewSet.as_view({"get": "list"}), name="auth-me-noslash"),
+    path("tenants", TenantViewSet.as_view({"get": "list", "post": "create"}), name="tenant-noslash"),
+
     path("", include(router.urls)),
 ]
