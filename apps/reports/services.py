@@ -14,8 +14,10 @@ from django.db.models import Count, F, ExpressionWrapper, DecimalField, Q, Sum
 from django.db.models.functions import TruncDay, TruncMonth, TruncWeek, TruncYear
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.catalog.models import Product
 from apps.inventory.models import StockBatch
+from apps.purchases.models import PurchaseOrder
 from apps.sales.models import Sale, SaleItem
 
 if TYPE_CHECKING:
@@ -415,6 +417,338 @@ class ReportService:
             "low_stock": low_stock,
             "near_expiry": near_expiry,
             "window_days": days,
+        }
+
+    @staticmethod
+    def get_overview(tenant: Tenant, limit: int = 8) -> dict[str, Any]:
+        """Return dashboard-card style overview data for enterprise reporting."""
+        today = timezone.now().date()
+        first_of_month = today.replace(day=1)
+
+        completed_sales = Sale.unscoped.filter(
+            tenant=tenant,
+            status__in=[Sale.Status.COMPLETED, Sale.Status.PARTIALLY_REFUNDED],
+        )
+        month_sales = completed_sales.filter(created_at__date__gte=first_of_month)
+
+        prev_month_end = first_of_month - timedelta(days=1)
+        if prev_month_end.month == 12:
+            prev_month_start = date(prev_month_end.year - 1, 12, 1)
+        else:
+            prev_month_start = date(prev_month_end.year, prev_month_end.month, 1)
+        prev_sales = completed_sales.filter(created_at__date__gte=prev_month_start, created_at__date__lte=prev_month_end)
+
+        month_agg = month_sales.aggregate(
+            rev=Sum("total_amount"),
+            profit=Sum("total_profit"),
+            count=Count("id"),
+            cost=Sum("total_cost"),
+        )
+        prev_agg = prev_sales.aggregate(
+            rev=Sum("total_amount"),
+            profit=Sum("total_profit"),
+            count=Count("id"),
+        )
+
+        def as_decimal(value: Any) -> Decimal:
+            return value if isinstance(value, Decimal) else Decimal(str(value or "0"))
+
+        def trend_percent(current: Decimal, previous: Decimal) -> float:
+            if previous == 0:
+                return 100.0 if current > 0 else 0.0
+            return round(float(((current - previous) / previous) * Decimal("100")), 1)
+
+        revenue_current = as_decimal(month_agg["rev"])
+        revenue_previous = as_decimal(prev_agg["rev"])
+        profit_current = as_decimal(month_agg["profit"])
+        profit_previous = as_decimal(prev_agg["profit"])
+        sales_current = int(month_agg["count"] or 0)
+        sales_previous = int(prev_agg["count"] or 0)
+
+        inventory_summary = ReportService.get_inventory_valuation(tenant)
+        low_stock_summary = ReportService.get_inventory_alerts(tenant=tenant, days=30)
+        purchase_orders = PurchaseOrder.unscoped.filter(tenant=tenant).exclude(status=PurchaseOrder.Status.CANCELLED)
+        purchase_total = purchase_orders.aggregate(total=Sum("total"))["total"] or Decimal("0.00")
+
+        kpis = [
+            {
+                "id": "revenue",
+                "label": "Revenue",
+                "value": str(revenue_current),
+                "previous_value": str(revenue_previous),
+                "trend": trend_percent(revenue_current, revenue_previous),
+                "format": "currency",
+                "icon": "DollarSign",
+                "accent": "success",
+            },
+            {
+                "id": "profit",
+                "label": "Profit",
+                "value": str(profit_current),
+                "previous_value": str(profit_previous),
+                "trend": trend_percent(profit_current, profit_previous),
+                "format": "currency",
+                "icon": "TrendingUp",
+                "accent": "success",
+            },
+            {
+                "id": "sales",
+                "label": "Sales",
+                "value": sales_current,
+                "previous_value": sales_previous,
+                "trend": trend_percent(Decimal(sales_current), Decimal(sales_previous)),
+                "format": "number",
+                "icon": "ShoppingBag",
+                "accent": "primary",
+            },
+            {
+                "id": "purchases",
+                "label": "Purchases",
+                "value": str(purchase_total),
+                "previous_value": "0.00",
+                "trend": 0.0,
+                "format": "currency",
+                "icon": "Package",
+                "accent": "info",
+            },
+            {
+                "id": "inventory",
+                "label": "Inventory Value",
+                "value": inventory_summary["cost_valuation"],
+                "previous_value": inventory_summary["cost_valuation"],
+                "trend": 0.0,
+                "format": "currency",
+                "icon": "Boxes",
+                "accent": "info",
+            },
+            {
+                "id": "stock",
+                "label": "Low Stock Items",
+                "value": len(low_stock_summary["low_stock"]),
+                "previous_value": 0,
+                "trend": 0.0,
+                "format": "number",
+                "icon": "AlertTriangle",
+                "accent": "warning",
+            },
+        ]
+
+        widgets = [
+            {"id": "revenue", "label": "Revenue", "value": str(revenue_current), "format": "currency"},
+            {"id": "profit", "label": "Profit", "value": str(profit_current), "format": "currency"},
+            {"id": "inventory", "label": "Inventory", "value": inventory_summary["cost_valuation"], "format": "currency"},
+            {"id": "purchases", "label": "Purchases", "value": str(purchase_total), "format": "currency"},
+            {"id": "low_stock", "label": "Low Stock", "value": len(low_stock_summary["low_stock"]), "format": "number"},
+        ]
+
+        recent_activity_items = []
+        for sale in completed_sales.order_by("-created_at")[:3]:
+            recent_activity_items.append(
+                {
+                    "id": f"sale-{sale.id}",
+                    "type": "sale",
+                    "title": f"Sale {sale.invoice_number}",
+                    "meta": f"{sale.total_amount}",
+                    "created_at": sale.created_at.isoformat(),
+                }
+            )
+        for purchase in purchase_orders.order_by("-created_at")[:2]:
+            recent_activity_items.append(
+                {
+                    "id": f"purchase-{purchase.id}",
+                    "type": "purchase",
+                    "title": purchase.po_number,
+                    "meta": purchase.status,
+                    "created_at": purchase.created_at.isoformat(),
+                }
+            )
+        for audit_event in AuditEvent.objects.filter(tenant=tenant).order_by("-created_at")[:3]:
+            recent_activity_items.append(
+                {
+                    "id": f"audit-{audit_event.id}",
+                    "type": "audit",
+                    "title": audit_event.entity_type,
+                    "meta": audit_event.action,
+                    "created_at": audit_event.created_at.isoformat(),
+                }
+            )
+
+        recent_activity = sorted(recent_activity_items, key=lambda item: item["created_at"], reverse=True)[:limit]
+
+        return {
+            "kpis": kpis,
+            "widgets": widgets,
+            "recent_activity": recent_activity,
+        }
+
+    @staticmethod
+    def get_analytics(
+        tenant: Tenant,
+        period: str = "monthly",
+        chart_type: str = "revenue",
+        start_date: date | str | None = None,
+        end_date: date | str | None = None,
+        branch: str | None = None,
+        warehouse: str | None = None,
+        supplier: str | None = None,
+        customer: str | None = None,
+        cashier: str | None = None,
+        product: str | None = None,
+        category: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
+        ordering: str = "desc",
+        limit: int = 8,
+    ) -> dict[str, Any]:
+        """Return analytics payload with summary, trend data, and product rankings."""
+        sale_qs = Sale.unscoped.filter(
+            tenant=tenant,
+            status__in=[Sale.Status.COMPLETED, Sale.Status.PARTIALLY_REFUNDED],
+        )
+        sale_item_qs = SaleItem.unscoped.filter(sale__tenant=tenant, sale__in=sale_qs)
+
+        if start_date:
+            sale_qs = sale_qs.filter(created_at__date__gte=start_date)
+            sale_item_qs = sale_item_qs.filter(sale__created_at__date__gte=start_date)
+        if end_date:
+            sale_qs = sale_qs.filter(created_at__date__lte=end_date)
+            sale_item_qs = sale_item_qs.filter(sale__created_at__date__lte=end_date)
+        if branch:
+            sale_qs = sale_qs.filter(branch__icontains=branch)
+        if warehouse:
+            sale_qs = sale_qs.filter(branch__icontains=warehouse)
+        if customer:
+            sale_qs = sale_qs.filter(Q(customer_name__icontains=customer) | Q(customer_phone__icontains=customer))
+        if cashier:
+            sale_qs = sale_qs.filter(
+                Q(cashier__email__icontains=cashier)
+                | Q(cashier__first_name__icontains=cashier)
+                | Q(cashier__last_name__icontains=cashier)
+            )
+        if status:
+            sale_qs = sale_qs.filter(status=status)
+        if search:
+            sale_qs = sale_qs.filter(
+                Q(invoice_number__icontains=search)
+                | Q(receipt_number__icontains=search)
+                | Q(customer_name__icontains=search)
+                | Q(branch__icontains=search)
+                | Q(notes__icontains=search)
+            )
+            sale_item_qs = sale_item_qs.filter(
+                Q(product__name__icontains=search) | Q(product__sku__icontains=search)
+            )
+        if product:
+            sale_item_qs = sale_item_qs.filter(Q(product__name__icontains=product) | Q(product__sku__icontains=product))
+            matching_sale_ids = sale_item_qs.values_list("sale_id", flat=True).distinct()
+            sale_qs = sale_qs.filter(id__in=matching_sale_ids)
+        if category:
+            sale_item_qs = sale_item_qs.filter(product__category__icontains=category)
+            matching_sale_ids = sale_item_qs.values_list("sale_id", flat=True).distinct()
+            sale_qs = sale_qs.filter(id__in=matching_sale_ids)
+
+        summary = sale_qs.aggregate(
+            sales_count=Count("id"),
+            revenue=Sum("total_amount"),
+            profit=Sum("total_profit"),
+            cost=Sum("total_cost"),
+            tax=Sum("tax_amount"),
+            discount=Sum("discount_amount"),
+        )
+        sales_count = int(summary["sales_count"] or 0)
+        revenue_total = summary["revenue"] or Decimal("0.00")
+        profit_total = summary["profit"] or Decimal("0.00")
+        cost_total = summary["cost"] or Decimal("0.00")
+
+        order = "-total_revenue" if ordering == "desc" else "total_revenue"
+        top_products = (
+            sale_item_qs.values("product__id", "product__name", "product__sku")
+            .annotate(
+                total_units=Sum("quantity"),
+                total_revenue=Sum("total_price"),
+                total_profit=Sum("profit"),
+            )
+            .order_by(order)[:limit]
+        )
+
+        sold_product_ids = sale_item_qs.values_list("product__id", flat=True).distinct()
+        slow_moving_products = list(
+            Product.unscoped.filter(tenant=tenant, is_active=True).exclude(id__in=sold_product_ids)[:limit]
+        )
+
+        trend_data = []
+        trend_labels = []
+        if period == "monthly":
+            trend_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+            trend_series = [Decimal("0.00")] * 12
+            records = (
+                sale_qs.annotate(period_key=TruncMonth("created_at"))
+                .values("period_key")
+                .annotate(value=Sum("total_amount"))
+                .order_by("period_key")
+            )
+            for record in records:
+                if record["period_key"]:
+                    trend_series[record["period_key"].month - 1] = record["value"] or Decimal("0.00")
+            for idx, value in enumerate(trend_series):
+                trend_data.append(str(value))
+        else:
+            trend_labels = ["Today", "Yesterday", "2d", "3d", "4d", "5d", "6d"]
+            trend_series = []
+            for idx in range(6, -1, -1):
+                day_date = timezone.now().date() - timedelta(days=idx)
+                day_sales = sale_qs.filter(created_at__date=day_date).aggregate(value=Sum("total_amount"))
+                trend_series.append(str(day_sales["value"] or Decimal("0.00")))
+            trend_data = trend_series
+
+        metric_name = chart_type if chart_type in {"revenue", "profit", "sales"} else "revenue"
+        if metric_name == "profit":
+            trend_series_values = [str(profit_total)]
+            trend_labels = ["Total"]
+            trend_data = [str(profit_total)]
+        elif metric_name == "sales":
+            trend_series_values = [str(sales_count)]
+            trend_labels = ["Total"]
+            trend_data = [str(sales_count)]
+        else:
+            trend_series_values = trend_data
+
+        return {
+            "summary": {
+                "sales_count": sales_count,
+                "revenue": str(revenue_total),
+                "profit": str(profit_total),
+                "cost": str(cost_total),
+                "average_sale_value": str(revenue_total / Decimal(sales_count) if sales_count else Decimal("0.00")),
+            },
+            "trend": {
+                "period": period,
+                "labels": trend_labels,
+                "datasets": {
+                    "metric": metric_name,
+                    "data": trend_series_values,
+                },
+            },
+            "top_products": [
+                {
+                    "product_id": item["product__id"],
+                    "product_name": item["product__name"],
+                    "sku": item["product__sku"],
+                    "total_units": item["total_units"],
+                    "total_revenue": str(item["total_revenue"] or Decimal("0.00")),
+                    "total_profit": str(item["total_profit"] or Decimal("0.00")),
+                }
+                for item in top_products
+            ],
+            "slow_moving_products": [
+                {
+                    "product_id": product_item.id,
+                    "product_name": product_item.name,
+                    "sku": product_item.sku,
+                    "status": "Slow moving",
+                }
+                for product_item in slow_moving_products
+            ],
         }
 
     @staticmethod

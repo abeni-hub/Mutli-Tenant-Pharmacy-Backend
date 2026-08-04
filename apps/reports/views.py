@@ -113,6 +113,61 @@ class ReportViewSet(viewsets.ViewSet):
         data = ReportService.get_inventory_alerts(tenant=tenant, days=days)
         return Response(data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["get"], url_path="overview")
+    def overview(self, request):
+        tenant = self._get_tenant(request)
+        limit_param = request.query_params.get("limit", "8")
+        try:
+            limit = int(limit_param)
+        except (TypeError, ValueError):
+            limit = 8
+
+        data = ReportService.get_overview(tenant=tenant, limit=limit)
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="analytics")
+    def analytics(self, request):
+        tenant = self._get_tenant(request)
+        period = request.query_params.get("period", "monthly")
+        chart_type = request.query_params.get("chart_type", "revenue")
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        branch = request.query_params.get("branch")
+        warehouse = request.query_params.get("warehouse")
+        supplier = request.query_params.get("supplier")
+        customer = request.query_params.get("customer")
+        cashier = request.query_params.get("cashier")
+        product = request.query_params.get("product")
+        category = request.query_params.get("category")
+        status_param = request.query_params.get("status")
+        search = request.query_params.get("search")
+        ordering = request.query_params.get("ordering", "desc")
+        limit_param = request.query_params.get("limit", "8")
+        try:
+            limit = int(limit_param)
+        except (TypeError, ValueError):
+            limit = 8
+
+        data = ReportService.get_analytics(
+            tenant=tenant,
+            period=period,
+            chart_type=chart_type,
+            start_date=start_date,
+            end_date=end_date,
+            branch=branch,
+            warehouse=warehouse,
+            supplier=supplier,
+            customer=customer,
+            cashier=cashier,
+            product=product,
+            category=category,
+            status=status_param,
+            search=search,
+            ordering=ordering,
+            limit=limit,
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=["get"], url_path="charts")
     def charts(self, request):
         tenant = self._get_tenant(request)

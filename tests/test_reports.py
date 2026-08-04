@@ -202,6 +202,35 @@ class TestReportsSystem:
         assert any(item["product_name"] == "Amoxicillin 250mg" for item in data["low_stock"])
         assert any(item["product_name"] == "Amoxicillin 250mg" for item in data["near_expiry"])
 
+    def test_08_overview_endpoint_includes_enterprise_kpis(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.owner_token}")
+        res = self.client.get(
+            "/api/v1/reports/overview/",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        assert res.status_code == 200, res.data
+        data = res.data
+        assert "kpis" in data
+        assert "widgets" in data
+        assert "recent_activity" in data
+        assert any(item["id"] == "revenue" for item in data["kpis"])
+        assert any(item["id"] == "inventory" for item in data["widgets"])
+
+    def test_09_analytics_endpoint_supports_trends_and_filters(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.owner_token}")
+        res = self.client.get(
+            "/api/v1/reports/analytics/?period=monthly&chart_type=revenue",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        assert res.status_code == 200, res.data
+        data = res.data
+        assert "summary" in data
+        assert "trend" in data
+        assert "top_products" in data
+        assert "slow_moving_products" in data
+        assert data["summary"]["sales_count"] >= 1
+        assert len(data["trend"]["labels"]) == 12
+
     def _get_token(self, user: User) -> str:
         login_res = self.client.post(
             "/api/v1/auth/login/",
