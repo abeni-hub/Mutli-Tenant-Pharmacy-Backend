@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -49,10 +49,19 @@ class SaleService:
         customer_name: str = "",
         customer_phone: str = "",
         payment_method: str = Sale.PaymentMethod.CASH,
+        payment_status: str = Sale.PaymentStatus.PENDING,
+        sale_status: str = Sale.Status.COMPLETED,
+        sale_source: str = Sale.SaleSource.POS,
+        branch: str = "",
+        receipt_number: str = "",
+        sale_reference: str = "",
         discount_amount: Decimal | float = 0.0,
         discount_percent: Decimal | float = 0.0,
         tax_rate: Decimal | float = 0.0,
         notes: str = "",
+        internal_remarks: str = "",
+        change_returned: Decimal | float = 0.0,
+        loyalty_points: int = 0,
     ) -> Sale:
         """
         Process checkout for multiple medicines under a single invoice.
@@ -64,6 +73,7 @@ class SaleService:
             raise ValidationError({"items": "At least one product item is required to process a sale."})
 
         invoice_number = SaleService.generate_invoice_number(tenant)
+        sale_status_dec = sale_status or Sale.Status.COMPLETED
         tax_rate_dec = Decimal(str(tax_rate))
         global_discount_dec = Decimal(str(discount_amount))
         discount_pct_dec = Decimal(str(discount_percent))
@@ -87,6 +97,9 @@ class SaleService:
                 product = Product.unscoped.get(id=product_id, tenant=tenant)
             except Product.DoesNotExist:
                 raise ValidationError({"items": f"Product with ID '{product_id}' not found."})
+
+            if sale_status_dec == Sale.Status.HELD:
+                continue
 
             # Execute FIFO stock deduction for this product
             deductions = InventoryService.stock_out_fifo(
@@ -163,20 +176,30 @@ class SaleService:
         sale = Sale.unscoped.create(
             tenant=tenant,
             invoice_number=invoice_number,
+            receipt_number=receipt_number or f"RCP-{invoice_number}",
+            sale_reference=sale_reference or f"REF-{invoice_number}",
             customer_name=customer_name,
             customer_phone=customer_phone,
             cashier=cashier,
             payment_method=payment_method,
-            status=Sale.Status.COMPLETED,
+            payment_status=payment_status,
+            status=sale_status_dec,
+            sale_source=sale_source,
+            branch=branch,
             is_taxable=is_taxable,
             subtotal=subtotal_dec,
             discount_amount=total_discount,
+            discount_breakdown={"global_discount": str(computed_global_discount), "item_discounts": str(total_item_discounts_dec)},
             tax_rate=tax_rate_dec,
+            tax_breakdown={"taxable_amount": str(taxable_amount), "tax_amount": str(tax_amount_dec)},
             tax_amount=tax_amount_dec,
             total_amount=total_amount_dec,
+            change_returned=Decimal(str(change_returned)),
+            loyalty_points=loyalty_points,
             total_cost=total_cost_dec,
             total_profit=total_profit_dec,
             notes=notes,
+            internal_remarks=internal_remarks,
         )
 
         # Save SaleItems
@@ -195,6 +218,10 @@ class SaleService:
                 profit=item_dict["profit"],
             )
 
+        if sale_status_dec == Sale.Status.HELD:
+            sale.payment_status = Sale.PaymentStatus.PENDING
+            sale.save(update_fields=["payment_status"])
+
         AuditService.record(
             tenant=tenant,
             actor=cashier,
@@ -207,6 +234,28 @@ class SaleService:
                 "total_profit": str(total_profit_dec),
                 "items_count": len(sale_items_to_create),
             },
+        )
+        return sale
+
+    @staticmethod
+    @transaction.atomic
+    def resume_sale(*, sale_id: UUID, resumed_by: User) -> Sale:
+        try:
+            sale = Sale.unscoped.select_for_update().get(id=sale_id)
+        except Sale.DoesNotExist:
+            raise ValidationError("Sale not found.")
+        if sale.status != Sale.Status.HELD:
+            raise ValidationError("Only held sales can be resumed.")
+        sale.status = Sale.Status.DRAFT
+        sale.payment_status = Sale.PaymentStatus.PENDING
+        sale.save(update_fields=["status", "payment_status"])
+        AuditService.record(
+            tenant=sale.tenant,
+            actor=resumed_by,
+            action="update",
+            entity_type="sales.Sale",
+            entity_id=sale.id,
+            metadata={"status": "draft", "action": "RESUME"},
         )
         return sale
 
@@ -355,6 +404,24 @@ class SaleService:
             },
         )
         return refund
+
+    @staticmethod
+    def generate_daily_sales(tenant: Tenant) -> list[dict[str, Any]]:
+        today = timezone.now().date()
+        qs = Sale.unscoped.filter(tenant=tenant, created_at__date=today)
+        return list(qs.values("invoice_number", "total_amount", "payment_method", "status").order_by("-created_at"))
+
+    @staticmethod
+    def generate_payment_summary(tenant: Tenant) -> dict[str, Any]:
+        qs = Sale.unscoped.filter(tenant=tenant, status__in=[Sale.Status.COMPLETED, Sale.Status.PARTIALLY_REFUNDED, Sale.Status.REFUNDED])
+        return {
+            Sale.PaymentMethod.CASH: str(qs.filter(payment_method=Sale.PaymentMethod.CASH).aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")),
+            Sale.PaymentMethod.CARD: str(qs.filter(payment_method=Sale.PaymentMethod.CARD).aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")),
+            Sale.PaymentMethod.MOBILE_MONEY: str(qs.filter(payment_method=Sale.PaymentMethod.MOBILE_MONEY).aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")),
+            Sale.PaymentMethod.BANK_TRANSFER: str(qs.filter(payment_method=Sale.PaymentMethod.BANK_TRANSFER).aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")),
+            Sale.PaymentMethod.SPLIT: str(qs.filter(payment_method=Sale.PaymentMethod.SPLIT).aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")),
+            Sale.PaymentMethod.OTHER: str(qs.filter(payment_method=Sale.PaymentMethod.OTHER).aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")),
+        }
 
     @staticmethod
     def generate_sales_report(
