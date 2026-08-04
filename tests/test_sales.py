@@ -305,6 +305,65 @@ class TestSalesSystem:
         assert float(summary["total_revenue"]) > 0
         assert float(summary["total_profit"]) > 0
 
+    def test_08_hold_and_resume_sale_without_deducting_stock(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.token}")
+        held_res = self.client.post(
+            "/api/v1/sales/",
+            {
+                "items": [{"product_id": str(self.paracetamol.id), "quantity": 3}],
+                "payment_method": "cash",
+                "sale_status": "held",
+                "branch": "Downtown Branch",
+                "customer_name": "Walk-in Customer",
+            },
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+            format="json",
+        )
+
+        assert held_res.status_code == 201, held_res.data
+        assert held_res.data["status"] == "held"
+        assert held_res.data["payment_status"] == "pending"
+        self.batch_para.refresh_from_db()
+        assert self.batch_para.quantity == 100
+
+        resume_res = self.client.post(
+            f"/api/v1/sales/{held_res.data['id']}/resume/",
+            {},
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+            format="json",
+        )
+
+        assert resume_res.status_code == 200, resume_res.data
+        assert resume_res.data["sale"]["status"] == "draft"
+
+    def test_09_sales_reporting_endpoints(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.token}")
+        self.client.post(
+            "/api/v1/sales/",
+            {
+                "items": [{"product_id": str(self.paracetamol.id), "quantity": 2}],
+                "payment_method": "card",
+                "branch": "North Branch",
+            },
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+            format="json",
+        )
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self._get_token(self.owner)}")
+        daily_res = self.client.get(
+            "/api/v1/sales/daily/",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        payment_res = self.client.get(
+            "/api/v1/sales/payment-summary/",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+
+        assert daily_res.status_code == 200, daily_res.data
+        assert payment_res.status_code == 200, payment_res.data
+        assert isinstance(daily_res.data, list)
+        assert "card" in payment_res.data
+
     def _get_token(self, user: User) -> str:
         login_res = self.client.post(
             "/api/v1/auth/login/",

@@ -37,7 +37,16 @@ class InventoryService:
         unit_price: Decimal | float,
         selling_price: Decimal | float,
         manufacture_date: date | None = None,
+        purchase_date: date | None = None,
         supplier: str = "",
+        purchase_order_reference: str = "",
+        warehouse: str = "",
+        branch: str = "",
+        location: str = "",
+        reorder_level: int = 0,
+        reorder_quantity: int = 0,
+        notes: str = "",
+        batch_status: str = "active",
         reference_number: str = "",
         performed_by: User | None = None,
     ) -> StockBatch:
@@ -56,7 +65,16 @@ class InventoryService:
                 "selling_price": Decimal(str(selling_price)),
                 "expiry_date": expiry_date,
                 "manufacture_date": manufacture_date,
+                "purchase_date": purchase_date,
                 "supplier": supplier,
+                "purchase_order_reference": purchase_order_reference,
+                "warehouse": warehouse,
+                "branch": branch,
+                "location": location,
+                "reorder_level": reorder_level,
+                "reorder_quantity": reorder_quantity,
+                "notes": notes,
+                "batch_status": batch_status,
                 "is_active": True,
             },
         )
@@ -70,8 +88,26 @@ class InventoryService:
             batch.expiry_date = expiry_date
             if manufacture_date:
                 batch.manufacture_date = manufacture_date
+            if purchase_date:
+                batch.purchase_date = purchase_date
             if supplier:
                 batch.supplier = supplier
+            if purchase_order_reference:
+                batch.purchase_order_reference = purchase_order_reference
+            if warehouse:
+                batch.warehouse = warehouse
+            if branch:
+                batch.branch = branch
+            if location:
+                batch.location = location
+            if reorder_level:
+                batch.reorder_level = reorder_level
+            if reorder_quantity:
+                batch.reorder_quantity = reorder_quantity
+            if notes:
+                batch.notes = notes
+            if batch_status:
+                batch.batch_status = batch_status
             batch.save()
 
         # Audit Log
@@ -112,6 +148,7 @@ class InventoryService:
         quantity: int,
         reason: str = "Sale Dispense",
         reference_number: str = "",
+        batch_id: str | None = None,
         performed_by: User | None = None,
     ) -> list[dict[str, Any]]:
         """
@@ -125,15 +162,18 @@ class InventoryService:
             raise ValidationError({"quantity": "Quantity to deduct must be greater than zero."})
 
         today = timezone.now().date()
+        filters = {
+            "tenant": tenant,
+            "product": product,
+            "is_active": True,
+            "quantity__gt": 0,
+            "expiry_date__gt": today,
+        }
+        if batch_id:
+            filters["id"] = batch_id
         available_batches = (
             StockBatch.unscoped.select_for_update()
-            .filter(
-                tenant=tenant,
-                product=product,
-                is_active=True,
-                quantity__gt=0,
-                expiry_date__gt=today,
-            )
+            .filter(**filters)
             .order_by("expiry_date", "created_at")
         )
 
@@ -201,6 +241,109 @@ class InventoryService:
 
     @staticmethod
     @transaction.atomic
+    def transfer_stock(
+        *,
+        tenant: Tenant,
+        batch: StockBatch,
+        quantity: int,
+        destination: str,
+        reason: str = "Transfer",
+        reference_number: str = "",
+        performed_by: User | None = None,
+    ) -> StockBatch:
+        if quantity <= 0:
+            raise ValidationError({"quantity": "Transfer quantity must be greater than zero."})
+        if quantity > batch.available_quantity:
+            raise ValidationError({"quantity": "Transfer quantity exceeds available quantity."})
+
+        prev_qty = batch.quantity
+        batch.quantity -= quantity
+        batch.save(update_fields=["quantity", "updated_at"])
+
+        InventoryLog.unscoped.create(
+            tenant=tenant,
+            product=batch.product,
+            batch=batch,
+            transaction_type=InventoryLog.TransactionType.TRANSFER,
+            quantity_changed=-quantity,
+            previous_quantity=prev_qty,
+            new_quantity=batch.quantity,
+            reason=f"{reason}: {destination}",
+            reference_number=reference_number,
+            performed_by=performed_by,
+        )
+        return batch
+
+    @staticmethod
+    @transaction.atomic
+    def archive_batch(*, tenant: Tenant, batch: StockBatch, reason: str = "Archived", performed_by: User | None = None) -> StockBatch:
+        batch.is_active = False
+        batch.batch_status = StockBatch.BatchStatus.ARCHIVED
+        batch.save(update_fields=["is_active", "batch_status", "updated_at"])
+        InventoryLog.unscoped.create(
+            tenant=tenant,
+            product=batch.product,
+            batch=batch,
+            transaction_type=InventoryLog.TransactionType.ARCHIVE,
+            quantity_changed=0,
+            previous_quantity=batch.quantity,
+            new_quantity=batch.quantity,
+            reason=reason,
+            performed_by=performed_by,
+        )
+        return batch
+
+    @staticmethod
+    @transaction.atomic
+    def restore_batch(*, tenant: Tenant, batch: StockBatch, performed_by: User | None = None) -> StockBatch:
+        batch.is_active = True
+        batch.batch_status = StockBatch.BatchStatus.ACTIVE
+        batch.save(update_fields=["is_active", "batch_status", "updated_at"])
+        InventoryLog.unscoped.create(
+            tenant=tenant,
+            product=batch.product,
+            batch=batch,
+            transaction_type=InventoryLog.TransactionType.RESTORE,
+            quantity_changed=0,
+            previous_quantity=batch.quantity,
+            new_quantity=batch.quantity,
+            reason="Batch restored",
+            performed_by=performed_by,
+        )
+        return batch
+
+    @staticmethod
+    def get_inventory_summary(tenant: Tenant) -> dict[str, Any]:
+        today = timezone.now().date()
+        batches = StockBatch.unscoped.filter(tenant=tenant, is_active=True).select_related("product")
+        total_value = sum((batch.quantity * batch.unit_price) for batch in batches)
+        low_stock = sum(1 for batch in batches if batch.available_quantity <= batch.reorder_level) if batches else 0
+        near_expiry = batches.filter(expiry_date__gt=today, expiry_date__lte=today + timedelta(days=45)).count()
+        expired = batches.filter(expiry_date__lte=today).count()
+        return {
+            "total_value": round(float(total_value), 2),
+            "low_stock_batches": low_stock,
+            "near_expiry_batches": near_expiry,
+            "expired_batches": expired,
+        }
+
+    @staticmethod
+    def get_inventory_valuation(tenant: Tenant) -> dict[str, Any]:
+        batches = StockBatch.unscoped.filter(tenant=tenant, is_active=True).select_related("product")
+        total_units = batches.aggregate(total_units=Sum("quantity"))["total_units"] or 0
+        total_value = sum((batch.quantity * batch.unit_price) for batch in batches)
+        return {"total_units": total_units, "total_value": round(float(total_value), 2)}
+
+    @staticmethod
+    def get_batch_history(tenant: Tenant, batch: StockBatch) -> list[InventoryLog]:
+        return list(
+            InventoryLog.unscoped.select_related("product", "performed_by")
+            .filter(tenant=tenant, batch=batch)
+            .order_by("-created_at")
+        )
+
+    @staticmethod
+    @transaction.atomic
     def adjust_stock(
         *,
         tenant: Tenant,
@@ -248,6 +391,79 @@ class InventoryService:
                 "new_qty": new_quantity,
                 "reason": reason,
             },
+        )
+        return batch
+
+    @staticmethod
+    @transaction.atomic
+    def transfer_stock(
+        *,
+        tenant: Tenant,
+        batch: StockBatch,
+        quantity: int,
+        destination: str,
+        reason: str = "Transfer",
+        reference_number: str = "",
+        performed_by: User | None = None,
+    ) -> StockBatch:
+        if quantity <= 0:
+            raise ValidationError({"quantity": "Transfer quantity must be greater than zero."})
+        if quantity > batch.available_quantity:
+            raise ValidationError({"quantity": "Transfer quantity exceeds available quantity."})
+
+        prev_qty = batch.quantity
+        batch.quantity -= quantity
+        batch.save(update_fields=["quantity", "updated_at"])
+
+        InventoryLog.unscoped.create(
+            tenant=tenant,
+            product=batch.product,
+            batch=batch,
+            transaction_type=InventoryLog.TransactionType.TRANSFER,
+            quantity_changed=-quantity,
+            previous_quantity=prev_qty,
+            new_quantity=batch.quantity,
+            reason=f"{reason}: {destination}",
+            reference_number=reference_number,
+            performed_by=performed_by,
+        )
+        return batch
+
+    @staticmethod
+    @transaction.atomic
+    def archive_batch(*, tenant: Tenant, batch: StockBatch, reason: str = "Archived", performed_by: User | None = None) -> StockBatch:
+        batch.is_active = False
+        batch.batch_status = StockBatch.BatchStatus.ARCHIVED
+        batch.save(update_fields=["is_active", "batch_status", "updated_at"])
+        InventoryLog.unscoped.create(
+            tenant=tenant,
+            product=batch.product,
+            batch=batch,
+            transaction_type=InventoryLog.TransactionType.ARCHIVE,
+            quantity_changed=0,
+            previous_quantity=batch.quantity,
+            new_quantity=batch.quantity,
+            reason=reason,
+            performed_by=performed_by,
+        )
+        return batch
+
+    @staticmethod
+    @transaction.atomic
+    def restore_batch(*, tenant: Tenant, batch: StockBatch, performed_by: User | None = None) -> StockBatch:
+        batch.is_active = True
+        batch.batch_status = StockBatch.BatchStatus.ACTIVE
+        batch.save(update_fields=["is_active", "batch_status", "updated_at"])
+        InventoryLog.unscoped.create(
+            tenant=tenant,
+            product=batch.product,
+            batch=batch,
+            transaction_type=InventoryLog.TransactionType.RESTORE,
+            quantity_changed=0,
+            previous_quantity=batch.quantity,
+            new_quantity=batch.quantity,
+            reason="Batch restored",
+            performed_by=performed_by,
         )
         return batch
 

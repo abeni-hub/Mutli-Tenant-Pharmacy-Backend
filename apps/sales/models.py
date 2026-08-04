@@ -5,6 +5,8 @@ from core.models import TenantScopedModel
 
 class Sale(TenantScopedModel):
     class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        HELD = "held", "Held"
         COMPLETED = "completed", "Completed"
         CANCELLED = "cancelled", "Cancelled"
         PARTIALLY_REFUNDED = "partially_refunded", "Partially Refunded"
@@ -14,13 +16,50 @@ class Sale(TenantScopedModel):
         CASH = "cash", "Cash"
         CARD = "card", "Card / POS"
         MOBILE_MONEY = "mobile_money", "Mobile Money (Telebirr/CBE)"
+        BANK_TRANSFER = "bank_transfer", "Bank Transfer"
+        SPLIT = "split", "Split Payment"
         OTHER = "other", "Other"
 
+    class PaymentStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PARTIAL = "partial", "Partial"
+        PAID = "paid", "Paid"
+        REFUNDED = "refunded", "Refunded"
+        FAILED = "failed", "Failed"
+
+    class SaleSource(models.TextChoices):
+        POS = "pos", "POS"
+        MANUAL = "manual", "Manual"
+        ONLINE = "online", "Online"
+
+    receipt_number = models.CharField(max_length=100, blank=True, db_index=True)
+    sale_reference = models.CharField(max_length=100, blank=True, db_index=True)
     invoice_number = models.CharField(max_length=100, db_index=True)
     customer_name = models.CharField(max_length=200, blank=True)
     customer_phone = models.CharField(max_length=50, blank=True)
+    customer = models.UUIDField(null=True, blank=True)
     cashier = models.ForeignKey(
         "accounts.User", on_delete=models.PROTECT, related_name="processed_sales"
+    )
+    pharmacist = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pharmacist_sales",
+    )
+    branch = models.CharField(max_length=200, blank=True)
+    payment_method = models.CharField(
+        max_length=30, choices=PaymentMethod.choices, default=PaymentMethod.CASH
+    )
+    payment_status = models.CharField(
+        max_length=30, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
+    )
+    status = models.CharField(
+        max_length=30, choices=Status.choices, default=Status.COMPLETED
+    )
+    sale_source = models.CharField(
+        max_length=20, choices=SaleSource.choices, default=SaleSource.POS
     )
     payment_method = models.CharField(
         max_length=30, choices=PaymentMethod.choices, default=PaymentMethod.CASH
@@ -34,14 +73,19 @@ class Sale(TenantScopedModel):
     discount_amount = models.DecimalField(
         max_digits=12, decimal_places=2, default=0.00, help_text="Global sale discount"
     )
+    discount_breakdown = models.JSONField(default=dict, blank=True)
     tax_rate = models.DecimalField(
         max_digits=5,
         decimal_places=2,
         default=0.00,
         help_text="Tax / VAT rate percentage (e.g. 15.00)",
     )
+    tax_breakdown = models.JSONField(default=dict, blank=True)
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    change_returned = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    loyalty_points = models.IntegerField(default=0)
+    internal_remarks = models.TextField(blank=True)
 
     # Cost of Goods Sold & Profit
     total_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)

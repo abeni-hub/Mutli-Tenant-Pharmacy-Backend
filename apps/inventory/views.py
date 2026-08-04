@@ -1,3 +1,4 @@
+from django.db.models import F, Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -12,6 +13,7 @@ from apps.inventory.serializers import (
     StockBatchSerializer,
     StockInSerializer,
     StockOutFIFOSerializer,
+    TransferSerializer,
 )
 from apps.inventory.services import InventoryService
 from apps.tenants.models import Tenant
@@ -35,15 +37,40 @@ class StockBatchViewSet(viewsets.ModelViewSet):
     """
     permission_classes = (IsAuthenticated, TenantMembershipPermission, HasActiveSubscription)
     serializer_class = StockBatchSerializer
-    filterset_fields = ("product", "batch_number", "is_active")
-    search_fields = ("batch_number", "product__name", "product__sku", "supplier")
-    ordering_fields = ("expiry_date", "quantity", "created_at")
+    filterset_fields = (
+        "product",
+        "batch_number",
+        "lot_number",
+        "supplier",
+        "purchase_order_reference",
+        "warehouse",
+        "branch",
+        "batch_status",
+        "is_active",
+    )
+    search_fields = (
+        "batch_number",
+        "lot_number",
+        "product__name",
+        "product__sku",
+        "supplier",
+        "purchase_order_reference",
+        "warehouse",
+        "branch",
+        "location",
+        "notes",
+    )
+    ordering_fields = ("expiry_date", "quantity", "created_at", "unit_price", "selling_price", "purchase_date")
 
     def get_queryset(self):
         tenant_id = getattr(self.request, "tenant_id", None)
         if not tenant_id:
             return StockBatch.objects.none()
-        return StockBatch.objects.select_related("product").filter(tenant_id=tenant_id)
+        return (
+            StockBatch.objects.select_related("product")
+            .filter(tenant_id=tenant_id)
+            .order_by("expiry_date", "created_at")
+        )
 
     @action(
         detail=False,
@@ -73,7 +100,16 @@ class StockBatchViewSet(viewsets.ModelViewSet):
             unit_price=serializer.validated_data["unit_price"],
             selling_price=serializer.validated_data["selling_price"],
             manufacture_date=serializer.validated_data.get("manufacture_date"),
+            purchase_date=serializer.validated_data.get("purchase_date"),
             supplier=serializer.validated_data.get("supplier", ""),
+            purchase_order_reference=serializer.validated_data.get("purchase_order_reference", ""),
+            warehouse=serializer.validated_data.get("warehouse", ""),
+            branch=serializer.validated_data.get("branch", ""),
+            location=serializer.validated_data.get("location", ""),
+            reorder_level=serializer.validated_data.get("reorder_level", 0),
+            reorder_quantity=serializer.validated_data.get("reorder_quantity", 0),
+            notes=serializer.validated_data.get("notes", ""),
+            batch_status=serializer.validated_data.get("batch_status", "active"),
             reference_number=serializer.validated_data.get("reference_number", ""),
             performed_by=request.user,
         )
@@ -108,6 +144,7 @@ class StockBatchViewSet(viewsets.ModelViewSet):
             quantity=serializer.validated_data["quantity"],
             reason=serializer.validated_data.get("reason", "Sale Dispense"),
             reference_number=serializer.validated_data.get("reference_number", ""),
+            batch_id=str(serializer.validated_data.get("batch_id")) if serializer.validated_data.get("batch_id") else None,
             performed_by=request.user,
         )
 
@@ -200,6 +237,101 @@ class StockBatchViewSet(viewsets.ModelViewSet):
 
         low_stock = InventoryService.get_low_stock_products(tenant)
         return Response(LowStockProductSerializer(low_stock, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="transfer", permission_classes=[IsAuthenticated, TenantMembershipPermission, HasActiveSubscription, CanManageInventory])
+    def transfer(self, request, pk=None):
+        tenant_id = request.tenant_id
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+        except Tenant.DoesNotExist:
+            raise ValidationError("Tenant not found.")
+
+        serializer = TransferSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        batch = self.get_queryset().filter(id=pk).first()
+        if not batch:
+            raise ValidationError("Batch not found.")
+
+        batch = InventoryService.transfer_stock(
+            tenant=tenant,
+            batch=batch,
+            quantity=serializer.validated_data["quantity"],
+            destination=serializer.validated_data["destination"],
+            reason=serializer.validated_data.get("reason", "Transfer"),
+            reference_number=serializer.validated_data.get("reference_number", ""),
+            performed_by=request.user,
+        )
+        return Response(StockBatchSerializer(batch).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="summary")
+    def summary(self, request):
+        tenant_id = request.tenant_id
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+        except Tenant.DoesNotExist:
+            raise ValidationError("Tenant not found.")
+        return Response(InventoryService.get_inventory_summary(tenant), status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="valuation")
+    def valuation(self, request):
+        tenant_id = request.tenant_id
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+        except Tenant.DoesNotExist:
+            raise ValidationError("Tenant not found.")
+        return Response(InventoryService.get_inventory_valuation(tenant), status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="history")
+    def history(self, request, pk=None):
+        tenant_id = request.tenant_id
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+        except Tenant.DoesNotExist:
+            raise ValidationError("Tenant not found.")
+        batch = self.get_queryset().filter(id=pk).first()
+        if not batch:
+            raise ValidationError("Batch not found.")
+        history = InventoryService.get_batch_history(tenant, batch)
+        return Response(InventoryLogSerializer(history, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="archive")
+    def archive(self, request, pk=None):
+        tenant_id = request.tenant_id
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+        except Tenant.DoesNotExist:
+            raise ValidationError("Tenant not found.")
+        batch = self.get_queryset().filter(id=pk).first()
+        if not batch:
+            raise ValidationError("Batch not found.")
+        batch = InventoryService.archive_batch(tenant=tenant, batch=batch, reason=request.data.get("reason", "Archived"), performed_by=request.user)
+        return Response(StockBatchSerializer(batch).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="restore")
+    def restore(self, request, pk=None):
+        tenant_id = request.tenant_id
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+        except Tenant.DoesNotExist:
+            raise ValidationError("Tenant not found.")
+        batch = self.get_queryset().filter(id=pk).first()
+        if not batch:
+            raise ValidationError("Batch not found.")
+        batch = InventoryService.restore_batch(tenant=tenant, batch=batch, performed_by=request.user)
+        return Response(StockBatchSerializer(batch).data, status=status.HTTP_200_OK)
 
 
 class InventoryLogViewSet(viewsets.ReadOnlyModelViewSet):

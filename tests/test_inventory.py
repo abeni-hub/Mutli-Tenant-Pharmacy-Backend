@@ -314,6 +314,37 @@ class TestInventorySystem:
         assert res.status_code == 200
         assert len(res.data) >= 2
 
+    def test_08_transfer_and_reporting_endpoints(self):
+        today = timezone.now().date()
+        batch = InventoryService.stock_in(
+            tenant=self.tenant,
+            product=self.paracetamol,
+            batch_number="BATCH-TRANSFER",
+            quantity=40,
+            expiry_date=today + timedelta(days=120),
+            unit_price=5.00,
+            selling_price=8.00,
+            performed_by=self.owner,
+        )
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.token}")
+        transfer_res = self.client.post(
+            f"/api/v1/inventory/batches/{batch.id}/transfer/",
+            {"quantity": 10, "destination": "Warehouse B", "reason": "Branch transfer"},
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+            format="json",
+        )
+        assert transfer_res.status_code == 200, transfer_res.data
+        assert transfer_res.data["quantity"] == 30
+
+        summary_res = self.client.get(
+            "/api/v1/inventory/batches/summary/",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        assert summary_res.status_code == 200
+        assert "total_value" in summary_res.data
+        assert "low_stock_batches" in summary_res.data
+
     def _get_token(self, user: User) -> str:
         login_res = self.client.post(
             "/api/v1/auth/login/",

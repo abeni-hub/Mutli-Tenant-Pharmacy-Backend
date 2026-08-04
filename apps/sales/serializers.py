@@ -53,6 +53,7 @@ class SaleRefundSerializer(serializers.ModelSerializer):
 class SaleCreateItemSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()
     quantity = serializers.IntegerField(min_value=1)
+    batch_id = serializers.UUIDField(required=False, allow_null=True, default=None)
     discount_amount = serializers.DecimalField(
         max_digits=10, decimal_places=2, required=False, default=0.00, min_value=0
     )
@@ -80,6 +81,18 @@ class SaleCreateSerializer(serializers.Serializer):
     payment_method = serializers.ChoiceField(
         choices=Sale.PaymentMethod.choices, default=Sale.PaymentMethod.CASH
     )
+    payment_status = serializers.ChoiceField(
+        choices=Sale.PaymentStatus.choices, required=False, default=Sale.PaymentStatus.PENDING
+    )
+    sale_status = serializers.ChoiceField(
+        choices=[Sale.Status.DRAFT, Sale.Status.HELD, Sale.Status.COMPLETED], required=False, default=Sale.Status.COMPLETED
+    )
+    sale_source = serializers.ChoiceField(
+        choices=Sale.SaleSource.choices, required=False, default=Sale.SaleSource.POS
+    )
+    branch = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+    receipt_number = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    sale_reference = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
     discount_amount = serializers.DecimalField(
         max_digits=12, decimal_places=2, required=False, default=0.00, min_value=0
     )
@@ -95,11 +108,18 @@ class SaleCreateSerializer(serializers.Serializer):
         help_text="Set to 0.00 for tax-free sale, or e.g. 15.00 for 15% VAT",
     )
     notes = serializers.CharField(required=False, allow_blank=True, default="")
+    internal_remarks = serializers.CharField(required=False, allow_blank=True, default="")
+    change_returned = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0.00, min_value=0)
 
     def validate_items(self, value):
         if not value:
             raise serializers.ValidationError("At least one item is required for checkout.")
         return value
+
+    def validate(self, attrs):
+        if attrs.get("sale_status") == Sale.Status.HELD and attrs.get("payment_status") != Sale.PaymentStatus.PENDING:
+            raise serializers.ValidationError({"payment_status": "Held sales must remain pending until completed."})
+        return attrs
 
 
 class SaleListSerializer(serializers.ModelSerializer):
@@ -111,17 +131,24 @@ class SaleListSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "invoice_number",
+            "receipt_number",
+            "sale_reference",
             "customer_name",
             "customer_phone",
             "cashier_name",
+            "branch",
             "payment_method",
+            "payment_status",
             "status",
+            "sale_source",
             "is_taxable",
             "subtotal",
             "discount_amount",
             "tax_rate",
             "tax_amount",
             "total_amount",
+            "change_returned",
+            "loyalty_points",
             "total_profit",
             "items_count",
             "created_at",
@@ -148,20 +175,28 @@ class SaleDetailSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "invoice_number",
+            "receipt_number",
+            "sale_reference",
             "customer_name",
             "customer_phone",
             "cashier_name",
+            "branch",
             "payment_method",
+            "payment_status",
             "status",
+            "sale_source",
             "is_taxable",
             "subtotal",
             "discount_amount",
             "tax_rate",
             "tax_amount",
             "total_amount",
+            "change_returned",
+            "loyalty_points",
             "total_cost",
             "total_profit",
             "notes",
+            "internal_remarks",
             "cancelled_at",
             "cancelled_by_email",
             "cancellation_reason",
