@@ -12,6 +12,7 @@ from apps.accounts.views import (
     RegistrationViewSet,
 )
 from apps.catalog.views import ProductViewSet
+from apps.purchases.views import GoodsReceiptViewSet, PurchaseOrderViewSet, SupplierViewSet
 from apps.tenants.views import TenantContextViewSet, TenantViewSet
 
 router = DefaultRouter()
@@ -46,6 +47,11 @@ from apps.inventory.views import InventoryLogViewSet, StockBatchViewSet
 
 router.register("inventory/batches", StockBatchViewSet, basename="inventory-batch")
 router.register("inventory/logs", InventoryLogViewSet, basename="inventory-log")
+
+# ── Purchasing ─────────────────────────────────────────────────────────────
+router.register("suppliers", SupplierViewSet, basename="supplier")
+router.register("purchases", PurchaseOrderViewSet, basename="purchase")
+router.register("goods-receipts", GoodsReceiptViewSet, basename="goods-receipt")
 
 # ── Sales ─────────────────────────────────────────────────────────────────────
 from apps.sales.views import SaleViewSet
