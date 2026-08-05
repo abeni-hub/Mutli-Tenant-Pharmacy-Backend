@@ -48,6 +48,7 @@ POST http://localhost:8000/api/v1/auth/register/
 "last_name": "Tadesse",
 "phone_number": "+251911000001"
 }
+![alt text](image-13.png)
 
 Repeat for manager, cashier, inventory, pharmacist, accountant, superadmin
 ![alt text](image-1.png)
@@ -120,6 +121,8 @@ http://localhost:8000/api/v1/subscriptions/payment-requests/8eed976b-72be-41a6-a
 
 Add Products
 http://localhost:8000/api/v1/products/
+
+![alt text](image-15.png)
 ![alt text](image-10.png)
 
 Get Inventory of Tenant
@@ -146,5 +149,9 @@ The `apps.reports` app provides real-time dashboard analytics and financial repo
 - `GET /api/v1/reports/product-performance/` — Top & Slow medicines classification
 - `GET /api/v1/reports/inventory-valuation/` — Inventory asset valuation & stock stats
 - `GET /api/v1/reports/charts/` — Formatted time-series chart data
+
+
+Dashbaord
+![alt text](image-14.png)
 
 For full request and response payload documentation (including Product creation, Stock In, FIFO Stock Out, Stock Adjustment, Sales Checkout, Sale Cancellation, Item Refunds, and Reports), see [API_REFERENCE.md](file:///d:/Abeni%20Nest/Multi-Tenant/API_REFERENCE.md).
