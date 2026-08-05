@@ -25,11 +25,20 @@ class TestReportsSystem:
         self.cashier = User.objects.create_user(
             email="reportcashier@abeni.test", password="Password123!", first_name="Betelehem", last_name="Cashier"
         )
+        self.pharmacist = User.objects.create_user(
+            email="reportpharmacist@abeni.test", password="Password123!", first_name="Marta", last_name="Pharmacist"
+        )
+        self.superuser = User.objects.create_superuser(
+            email="reportsuper@abeni.test", password="Password123!"
+        )
         self.tenant = TenantService.create_for_owner(
             self.owner, TenantCreateData(name="Reports Test Pharmacy")
         )
         Membership.objects.create(
             tenant=self.tenant, user=self.cashier, role=Membership.Role.CASHIER
+        )
+        Membership.objects.create(
+            tenant=self.tenant, user=self.pharmacist, role=Membership.Role.PHARMACIST
         )
 
         # Active Enterprise Subscription
@@ -88,6 +97,8 @@ class TestReportsSystem:
 
         self.owner_token = self._get_token(self.owner)
         self.cashier_token = self._get_token(self.cashier)
+        self.pharmacist_token = self._get_token(self.pharmacist)
+        self.superuser_token = self._get_token(self.superuser)
 
     def test_01_dashboard_stats(self):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.owner_token}")
@@ -230,6 +241,60 @@ class TestReportsSystem:
         assert "slow_moving_products" in data
         assert data["summary"]["sales_count"] >= 1
         assert len(data["trend"]["labels"]) == 12
+
+    def test_10_role_dashboards_return_role_specific_payloads(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.owner_token}")
+        owner_res = self.client.get(
+            "/api/v1/dashboard/owner/",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        assert owner_res.status_code == 200, owner_res.data
+        assert "kpis" in owner_res.data
+        assert "recent_activities" in owner_res.data
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.pharmacist_token}")
+        pharmacist_res = self.client.get(
+            "/api/v1/dashboard/pharmacist/",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        assert pharmacist_res.status_code == 200, pharmacist_res.data
+        assert "inventory_summary" in pharmacist_res.data
+        assert "alerts" in pharmacist_res.data
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.cashier_token}")
+        cashier_res = self.client.get(
+            "/api/v1/dashboard/cashier/",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        assert cashier_res.status_code == 200, cashier_res.data
+        assert "today_sales" in cashier_res.data
+        assert "recent_transactions" in cashier_res.data
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superuser_token}")
+        super_admin_res = self.client.get("/api/v1/dashboard/super-admin/")
+        assert super_admin_res.status_code == 200, super_admin_res.data
+        assert "platform_summary" in super_admin_res.data
+
+    def test_11_pharmacist_cannot_access_sales_and_purchases(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.pharmacist_token}")
+        sales_res = self.client.get(
+            "/api/v1/sales/",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        purchases_res = self.client.get(
+            "/api/v1/purchases/",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        assert sales_res.status_code == 403
+        assert purchases_res.status_code == 403
+
+    def test_12_cashier_cannot_access_inventory_crud(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.cashier_token}")
+        inventory_res = self.client.get(
+            "/api/v1/inventory/batches/",
+            HTTP_X_TENANT_ID=str(self.tenant.id),
+        )
+        assert inventory_res.status_code == 403
 
     def _get_token(self, user: User) -> str:
         login_res = self.client.post(

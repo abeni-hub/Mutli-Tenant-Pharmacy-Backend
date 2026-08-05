@@ -5,12 +5,92 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.reports.services import ReportService
+from apps.sales.models import Sale
 from apps.tenants.models import Tenant
 from core.api.permissions import (
     CanViewFinancials,
     HasActiveSubscription,
     TenantMembershipPermission,
 )
+
+
+class DashboardViewSet(viewsets.ViewSet):
+    permission_classes = (IsAuthenticated,)
+
+    def get_permissions(self):
+        if getattr(self, "action", None) == "super_admin":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription()]
+
+    def _get_tenant(self, request) -> Tenant:
+        tenant_id = getattr(request, "tenant_id", None)
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+        try:
+            return Tenant.objects.get(id=tenant_id)
+        except Tenant.DoesNotExist as exc:
+            raise ValidationError("Tenant not found.") from exc
+
+    @action(detail=False, methods=["get"], url_path="owner")
+    def owner(self, request):
+        tenant = self._get_tenant(request)
+        data = ReportService.get_overview(tenant=tenant, limit=8)
+        data["recent_activities"] = data.pop("recent_activity", [])
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="pharmacist")
+    def pharmacist(self, request):
+        tenant = self._get_tenant(request)
+        dashboard_stats = ReportService.get_dashboard_stats(tenant)
+        alerts = ReportService.get_inventory_alerts(tenant=tenant, days=30)
+        return Response(
+            {
+                "inventory_summary": dashboard_stats.get("inventory_summary", {}),
+                "alerts": alerts,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"], url_path="cashier")
+    def cashier(self, request):
+        tenant = self._get_tenant(request)
+        dashboard_stats = ReportService.get_dashboard_stats(tenant)
+        recent_sales = (
+            Sale.unscoped.filter(
+                tenant=tenant,
+                status__in=[Sale.Status.COMPLETED, Sale.Status.PARTIALLY_REFUNDED],
+            )
+            .order_by("-created_at")[:5]
+        )
+        recent_transactions = [
+            {
+                "id": str(sale.id),
+                "invoice_number": sale.invoice_number,
+                "amount": str(sale.total_amount),
+                "status": sale.status,
+            }
+            for sale in recent_sales
+        ]
+        return Response(
+            {
+                "today_sales": dashboard_stats.get("today", {}),
+                "recent_transactions": recent_transactions,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"], url_path="super-admin")
+    def super_admin(self, request):
+        return Response(
+            {
+                "platform_summary": {
+                    "tenant_count": Tenant.objects.count(),
+                    "active_tenant_count": Tenant.objects.filter(is_active=True).count(),
+                    "recent_sales_count": Sale.unscoped.count(),
+                }
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ReportViewSet(viewsets.ViewSet):

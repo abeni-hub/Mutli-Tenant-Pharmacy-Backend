@@ -34,6 +34,14 @@ from core.tenant_context import TenantContext, set_tenant_context
 
 # ── Base permission classes ───────────────────────────────────────────────────
 
+class IsPlatformSuperAdmin(BasePermission):
+    """Allows only platform super admins to access platform management endpoints."""
+    message = "Only platform super admins can access this endpoint."
+
+    def has_permission(self, request, view) -> bool:
+        return bool(request.user and request.user.is_authenticated and request.user.is_superuser)
+
+
 class TenantMembershipPermission(BasePermission):
     """
     Requires a valid X-Tenant-ID header and an active Membership.
@@ -168,6 +176,26 @@ class CanProcessSale(TenantRolePermission):
         Membership.Role.PHARMACIST,
     )
     message = "Only Owners, Managers, Cashiers, or Pharmacists can process sales."
+
+
+class CanAccessSales(TenantRolePermission):
+    """Roles that can view and operate sales data."""
+    required_roles = (
+        Membership.Role.OWNER,
+        Membership.Role.MANAGER,
+        Membership.Role.CASHIER,
+    )
+    message = "Only Owners, Managers, or Cashiers can access sales data."
+
+
+class CanAccessPurchases(TenantRolePermission):
+    """Roles that can view and manage purchasing data."""
+    required_roles = (
+        Membership.Role.OWNER,
+        Membership.Role.MANAGER,
+        Membership.Role.ACCOUNTANT,
+    )
+    message = "Only Owners, Managers, or Accountants can access purchasing data."
 
 
 class CanViewFinancials(TenantRolePermission):

@@ -72,6 +72,15 @@ class StockBatchViewSet(viewsets.ModelViewSet):
             .order_by("expiry_date", "created_at")
         )
 
+    def get_permissions(self):
+        if self.action in {"list", "retrieve", "summary", "valuation", "expired_batches", "near_expiry_batches", "low_stock_products", "history", "archive"}:
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), CanManageInventory()]
+        if self.action == "stock_out_fifo":
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), CanProcessSale()]
+        if self.action in {"stock_in", "adjust_stock", "transfer"}:
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), CanManageInventory()]
+        return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription()]
+
     @action(
         detail=False,
         methods=["post"],

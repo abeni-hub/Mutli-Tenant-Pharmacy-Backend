@@ -19,6 +19,20 @@ class TenantService:
     @staticmethod
     @transaction.atomic
     def create_for_owner(owner: User, data: TenantCreateData) -> Tenant:
+        return TenantService.create_for_super_admin(
+            created_by=owner,
+            data=data,
+            owner=owner,
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def create_for_super_admin(
+        *,
+        created_by: User,
+        data: TenantCreateData,
+        owner: User | None = None,
+    ) -> Tenant:
         base_slug = slugify(data.name)
         slug = base_slug
         suffix = 2
@@ -30,12 +44,13 @@ class TenantService:
             slug=slug,
             registration_number=data.registration_number,
         )
-        Membership.objects.create(tenant=tenant, user=owner, role=Membership.Role.OWNER)
+        if owner is not None:
+            Membership.objects.create(tenant=tenant, user=owner, role=Membership.Role.OWNER)
         AuditService.record(
             tenant=tenant,
-            actor=owner,
+            actor=created_by,
             action="create",
-            entity_type="tenant",
+            entity_type="tenants.Tenant",
             entity_id=tenant.id,
             metadata={"name": tenant.name},
         )

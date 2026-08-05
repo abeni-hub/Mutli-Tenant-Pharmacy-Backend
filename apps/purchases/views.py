@@ -15,6 +15,7 @@ from apps.purchases.serializers import (
 from apps.purchases.services import PurchaseService
 from apps.tenants.models import Tenant
 from core.api.permissions import (
+    CanAccessPurchases,
     CanManageInventory,
     CanViewFinancials,
     HasActiveSubscription,
@@ -36,6 +37,11 @@ class SupplierViewSet(viewsets.ModelViewSet):
         if not tenant_id:
             return Supplier.unscoped.none()
         return Supplier.unscoped.filter(tenant_id=tenant_id)
+
+    def get_permissions(self):
+        if self.action in {"list", "retrieve", "create", "archive", "restore"}:
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), CanAccessPurchases()]
+        return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription()]
 
     def create(self, request, *args, **kwargs):
         tenant_id = request.tenant_id
@@ -81,6 +87,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             .prefetch_related("items__product")
             .filter(tenant_id=tenant_id)
         )
+
+    def get_permissions(self):
+        if self.action in {"list", "retrieve", "create", "summary", "supplier_performance", "trends", "costs", "outstanding", "received", "supplier_spend"}:
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), CanAccessPurchases()]
+        if self.action in {"approve", "cancel"}:
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), IsOwnerOrManager()]
+        return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription()]
 
     def create(self, request, *args, **kwargs):
         tenant_id = request.tenant_id
