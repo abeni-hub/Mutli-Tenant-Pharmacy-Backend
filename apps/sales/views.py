@@ -16,6 +16,7 @@ from apps.sales.serializers import (
 from apps.sales.services import SaleService
 from apps.tenants.models import Tenant
 from core.api.permissions import (
+    CanAccessSales,
     CanProcessSale,
     CanViewFinancials,
     HasActiveSubscription,
@@ -45,6 +46,15 @@ class SaleViewSet(viewsets.ModelViewSet):
         if not tenant_id:
             return Sale.unscoped.none()
         return Sale.unscoped.select_related("cashier", "cancelled_by").prefetch_related("items__product", "items__batch", "refunds").filter(tenant_id=tenant_id)
+
+    def get_permissions(self):
+        if self.action in {"list", "retrieve", "create", "receipt", "daily_sales", "payment_summary", "sales_report"}:
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), CanAccessSales()]
+        if self.action == "resume":
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), CanProcessSale()]
+        if self.action in {"cancel", "refund"}:
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), IsOwnerOrManager()]
+        return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription()]
 
     def get_serializer_class(self):
         if self.action == "list":

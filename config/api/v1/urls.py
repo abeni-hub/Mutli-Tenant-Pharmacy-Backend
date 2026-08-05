@@ -12,7 +12,8 @@ from apps.accounts.views import (
     RegistrationViewSet,
 )
 from apps.catalog.views import ProductViewSet
-from apps.tenants.views import TenantContextViewSet, TenantViewSet
+from apps.purchases.views import GoodsReceiptViewSet, PurchaseOrderViewSet, SupplierViewSet
+from apps.tenants.views import PlatformPaymentViewSet, PlatformTenantViewSet, PlatformViewSet, TenantContextViewSet, TenantViewSet
 
 router = DefaultRouter()
 
@@ -24,6 +25,9 @@ router.register("auth/login-history", LoginHistoryViewSet, basename="login-histo
 # ── Tenants ───────────────────────────────────────────────────────────────────
 router.register("tenants", TenantViewSet, basename="tenant")
 router.register("tenant-context", TenantContextViewSet, basename="tenant-context")
+router.register("platform/tenants", PlatformTenantViewSet, basename="platform-tenant")
+router.register("platform/payments", PlatformPaymentViewSet, basename="platform-payment")
+router.register("platform", PlatformViewSet, basename="platform")
 
 # ── Catalog ───────────────────────────────────────────────────────────────────
 router.register("products", ProductViewSet, basename="product")
@@ -47,14 +51,20 @@ from apps.inventory.views import InventoryLogViewSet, StockBatchViewSet
 router.register("inventory/batches", StockBatchViewSet, basename="inventory-batch")
 router.register("inventory/logs", InventoryLogViewSet, basename="inventory-log")
 
+# ── Purchasing ─────────────────────────────────────────────────────────────
+router.register("suppliers", SupplierViewSet, basename="supplier")
+router.register("purchases", PurchaseOrderViewSet, basename="purchase")
+router.register("goods-receipts", GoodsReceiptViewSet, basename="goods-receipt")
+
 # ── Sales ─────────────────────────────────────────────────────────────────────
 from apps.sales.views import SaleViewSet
 
 router.register("sales", SaleViewSet, basename="sale")
 
 # ── Reports & Analytics ───────────────────────────────────────────────────────
-from apps.reports.views import ReportViewSet
+from apps.reports.views import DashboardViewSet, ReportViewSet
 
+router.register("dashboard", DashboardViewSet, basename="dashboard")
 router.register("reports", ReportViewSet, basename="report")
 
 
