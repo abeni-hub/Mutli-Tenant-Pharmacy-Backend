@@ -39,15 +39,23 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "email", "is_active", "date_joined", "last_login_ip")
 
     def get_role(self, obj: User) -> str | None:
-        """Return the user's role in the current tenant, if a tenant context exists."""
+        """Return the user's role in the current tenant, or primary role fallback."""
+        from apps.tenants.models import Membership
+
+        if obj.is_superuser or obj.memberships.filter(role=Membership.Role.SUPER_ADMIN, is_active=True).exists():
+            return "super_admin"
+
         request = self.context.get("request")
-        if request is None:
-            return None
-        tenant_id = getattr(request, "tenant_id", None)
-        if tenant_id is None:
-            return None
-        membership = obj.memberships.filter(tenant_id=tenant_id, is_active=True).first()
-        return membership.role if membership else None
+        tenant_id = getattr(request, "tenant_id", None) if request else None
+
+        if tenant_id is not None:
+            membership = obj.memberships.filter(tenant_id=tenant_id, is_active=True).first()
+            return membership.role if membership else None
+
+        # Fallback when X-Tenant-ID is not provided (e.g. login endpoint response before tenant selection)
+        primary_membership = obj.memberships.filter(is_active=True).first()
+        return primary_membership.role if primary_membership else None
+
 
 
 class UserProfileUpdateSerializer(serializers.ModelSerializer):

@@ -22,10 +22,11 @@ class TestAuthSystemAllRoles:
 
     def test_01_register_all_roles(self):
         for email, _, first_name, last_name in self.roles:
+            reg_email = f"reg_{email}"
             response = self.client.post(
                 "/api/v1/auth/register/",
                 {
-                    "email": email,
+                    "email": reg_email,
                     "password": "SecurePassword123!",
                     "first_name": first_name,
                     "last_name": last_name,
@@ -33,7 +34,7 @@ class TestAuthSystemAllRoles:
                 format="json",
             )
             assert response.status_code == 201, response.data
-            assert response.data["email"] == email
+            assert response.data["email"] == reg_email
 
     def test_02_login_and_token_response(self):
         # Register owner
@@ -177,6 +178,70 @@ class TestAuthSystemAllRoles:
             Membership.Role.SUPER_ADMIN,
         ]
         for role in other_roles:
-            u = User.objects.create_user(email=f"{role}@abeni.test", password="Pass123!Password")
+            u = User.objects.create_user(email=f"test_role_{role}@abeni.test", password="Pass123!Password")
             m = Membership.objects.create(tenant=tenant, user=u, role=role)
             assert m.role == role
+
+    def test_06_role_resolution_all_four_personas(self):
+        owner = User.objects.create_user(email="owner_test@abeni.test", password="SecurePassword123!")
+        pharmacist = User.objects.create_user(email="pharm_test@abeni.test", password="SecurePassword123!")
+        cashier = User.objects.create_user(email="cashier_test@abeni.test", password="SecurePassword123!")
+        superadmin = User.objects.create_superuser(email="super_test@abeni.test", password="SecurePassword123!")
+
+        tenant = TenantService.create_for_owner(owner, TenantCreateData(name="Main Pharmacy"))
+        Membership.objects.create(tenant=tenant, user=pharmacist, role=Membership.Role.PHARMACIST)
+        Membership.objects.create(tenant=tenant, user=cashier, role=Membership.Role.CASHIER)
+
+        test_cases = [
+            (superadmin, "super_test@abeni.test", "super_admin"),
+            (owner, "owner_test@abeni.test", "owner"),
+            (pharmacist, "pharm_test@abeni.test", "pharmacist"),
+            (cashier, "cashier_test@abeni.test", "cashier"),
+        ]
+
+        for user, email, expected_role in test_cases:
+            login_res = self.client.post(
+                "/api/v1/auth/login/",
+                {"email": email, "password": "SecurePassword123!"},
+                format="json",
+            )
+            assert login_res.status_code == 200
+            assert login_res.data["user"]["role"] == expected_role
+
+            self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login_res.data['access']}")
+            me_no_header = self.client.get("/api/v1/auth/me/")
+            assert me_no_header.status_code == 200
+            assert me_no_header.data["role"] == expected_role
+
+            me_with_header = self.client.get(
+                "/api/v1/auth/me/",
+                HTTP_X_TENANT_ID=str(tenant.id),
+            )
+            assert me_with_header.status_code == 200
+            assert me_with_header.data["role"] == expected_role
+
+    def test_07_tenant_isolation_and_invalid_tenant(self):
+        user_a = User.objects.create_user(email="user_a@abeni.test", password="SecurePassword123!")
+        user_b = User.objects.create_user(email="user_b@abeni.test", password="SecurePassword123!")
+
+        tenant_a = TenantService.create_for_owner(user_a, TenantCreateData(name="Tenant A"))
+        tenant_b = TenantService.create_for_owner(user_b, TenantCreateData(name="Tenant B"))
+
+        # User A logs in and accesses Tenant B header (where User A has NO membership)
+        login_res = self.client.post(
+            "/api/v1/auth/login/",
+            {"email": "user_a@abeni.test", "password": "SecurePassword123!"},
+            format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login_res.data['access']}")
+
+        res = self.client.get("/api/v1/auth/me/", HTTP_X_TENANT_ID=str(tenant_b.id))
+        assert res.status_code == 200
+        assert res.data["role"] is None  # Does NOT leak role from Tenant A into Tenant B
+
+        # Test inactive membership
+        Membership.objects.filter(tenant=tenant_a, user=user_a).update(is_active=False)
+        res_inactive = self.client.get("/api/v1/auth/me/", HTTP_X_TENANT_ID=str(tenant_a.id))
+        assert res_inactive.status_code == 200
+        assert res_inactive.data["role"] is None
+

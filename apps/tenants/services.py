@@ -58,6 +58,8 @@ class TenantService:
 
     @staticmethod
     def accessible_to(user: User) -> list[Tenant]:
+        if user.is_superuser:
+            return list(Tenant.objects.filter(is_active=True).distinct())
         return list(
             Tenant.objects.filter(
                 memberships__user=user, memberships__is_active=True, is_active=True
