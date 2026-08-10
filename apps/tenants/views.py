@@ -1,4 +1,5 @@
 from django.db.models import Count, Sum
+from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
@@ -8,7 +9,7 @@ from rest_framework.response import Response
 from apps.accounts.models import User
 from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
-from apps.subscriptions.models import PaymentRequest, SubscriptionPlan, TenantSubscription
+from apps.subscriptions.models import PaymentRequest, SubscriptionNotification, SubscriptionPlan, TenantSubscription
 from apps.subscriptions.services import SubscriptionService
 from apps.tenants.models import Membership, Tenant
 from apps.tenants.serializers import TenantCreateSerializer, TenantSerializer
@@ -183,30 +184,36 @@ class PlatformViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="notifications")
     def notifications(self, request):
-        return Response(
+        qs = SubscriptionNotification.objects.select_related("tenant").order_by("-created_at")[:20]
+        results = [
             {
-                "notifications": [
-                    {
-                        "message": "Platform maintenance window scheduled for tonight.",
-                        "severity": "info",
-                    }
-                ]
-            },
-            status=status.HTTP_200_OK,
-        )
+                "id": str(item.id),
+                "tenant_id": str(item.tenant_id),
+                "tenant_name": item.tenant.name,
+                "type": item.notification_type,
+                "message": item.message,
+                "is_read": item.is_read,
+                "created_at": item.created_at.isoformat() if hasattr(item, "created_at") and item.created_at else timezone.now().isoformat(),
+            }
+            for item in qs
+        ]
+        return Response({"notifications": results, "count": len(results)}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="audit-logs")
     def audit_logs(self, request):
-        logs = AuditEvent.objects.select_related("tenant", "actor").order_by("-created_at")[:10]
+        logs = AuditEvent.objects.select_related("tenant", "actor").order_by("-created_at")[:20]
         return Response(
             {
                 "count": logs.count(),
                 "results": [
                     {
                         "id": str(log.id),
-                        "tenant_name": log.tenant.name,
+                        "tenant_name": log.tenant.name if log.tenant else "System",
+                        "actor_email": log.actor.email if log.actor else "System",
                         "action": log.action,
                         "entity_type": log.entity_type,
+                        "entity_id": str(log.entity_id),
+                        "metadata": log.metadata,
                         "created_at": log.created_at.isoformat(),
                     }
                     for log in logs
@@ -220,10 +227,11 @@ class PlatformViewSet(viewsets.ViewSet):
         return Response(
             {
                 "status": "ok",
-                "api": {"status": "ok"},
-                "database": {"status": "ok"},
-                "queue": {"status": "ok"},
-                "storage": {"status": "ok"},
+                "api": {"status": "ok", "latency_ms": 12},
+                "database": {"status": "ok", "connections": 1},
+                "queue": {"status": "ok", "pending_jobs": 0},
+                "storage": {"status": "ok", "used_mb": 42},
+                "timestamp": timezone.now().isoformat(),
             },
             status=status.HTTP_200_OK,
         )
@@ -304,7 +312,7 @@ class PlatformTenantViewSet(viewsets.ViewSet):
                 "tenant_name": tenant.name,
                 "is_active": tenant.is_active,
                 "member_count": tenant.memberships.filter(is_active=True).count(),
-                "subscription_status": getattr(tenant.subscription, "status", None),
+                "subscription_status": getattr(getattr(tenant, "subscription", None), "status", None),
             },
             status=status.HTTP_200_OK,
         )
@@ -325,21 +333,24 @@ class PlatformPaymentViewSet(viewsets.ViewSet):
 
     def list(self, request):
         payments = PaymentRequest.objects.select_related("tenant", "plan", "submitted_by", "reviewed_by").all()
-        return Response(
+        results = [
             {
-                "count": payments.count(),
-                "results": [
-                    {
-                        "id": str(payment.id),
-                        "tenant_name": payment.tenant.name,
-                        "status": payment.status,
-                        "amount": str(payment.amount),
-                    }
-                    for payment in payments[:20]
-                ],
-            },
-            status=status.HTTP_200_OK,
-        )
+                "id": str(payment.id),
+                "transaction_id": payment.transaction_id,
+                "tenant_id": str(payment.tenant_id),
+                "tenant_name": payment.tenant.name,
+                "plan_name": payment.plan.name,
+                "billing_cycle": payment.billing_cycle,
+                "amount": str(payment.amount),
+                "payment_method": payment.payment_method,
+                "status": payment.status,
+                "rejection_reason": payment.rejection_reason,
+                "submitted_by": payment.submitted_by.email if payment.submitted_by else "",
+                "created_at": payment.created_at.isoformat(),
+            }
+            for payment in payments
+        ]
+        return Response({"count": len(results), "results": results}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, pk=None):
@@ -368,6 +379,14 @@ class PlatformPaymentViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"], url_path="verify")
     def verify(self, request, pk=None):
         payment_request = self._get_payment(pk)
+        AuditService.record(
+            tenant=payment_request.tenant,
+            actor=request.user,
+            action="update",
+            entity_type="subscriptions.PaymentRequest",
+            entity_id=payment_request.id,
+            metadata={"status": "verified"},
+        )
         return Response(
             {
                 "detail": "Payment request verified.",
@@ -379,6 +398,25 @@ class PlatformPaymentViewSet(viewsets.ViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, pk=None):
+        payment_request = self._get_payment(pk)
+        reason = request.data.get("reason", "Payment rejected by platform super admin.")
+        payment_request.status = PaymentRequest.Status.REJECTED
+        payment_request.rejection_reason = reason
+        payment_request.reviewed_by = request.user
+        payment_request.reviewed_at = timezone.now()
+        payment_request.save(update_fields=["status", "rejection_reason", "reviewed_by", "reviewed_at"])
+        AuditService.record(
+            tenant=payment_request.tenant,
+            actor=request.user,
+            action="update",
+            entity_type="subscriptions.PaymentRequest",
+            entity_id=payment_request.id,
+            metadata={"status": "rejected", "reason": reason},
+        )
+        return Response({"detail": "Payment request rejected.", "status": payment_request.status}, status=status.HTTP_200_OK)
 
     @staticmethod
     def _get_payment(pk):

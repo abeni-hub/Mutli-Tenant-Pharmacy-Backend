@@ -52,16 +52,16 @@ class Command(BaseCommand):
             if user.last_name != last_name:
                 user.last_name = last_name
                 update_fields.append("last_name")
-            if is_super and (not user.is_superuser or not user.is_staff):
+            user.failed_login_attempts = 0
+            user.locked_until = None
+            user.is_active = True
+            if is_super:
                 user.is_superuser = True
                 user.is_staff = True
-                update_fields.extend(["is_superuser", "is_staff"])
             if not user.check_password(password):
                 user.set_password(password)
-                update_fields.append("password")
 
-            if update_fields:
-                user.save(update_fields=list(set(update_fields)))
+            user.save()
 
             Membership.objects.update_or_create(
                 tenant=tenant,
