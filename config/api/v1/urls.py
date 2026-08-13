@@ -13,7 +13,7 @@ from apps.accounts.views import (
 )
 from apps.catalog.views import ProductViewSet
 from apps.purchases.views import GoodsReceiptViewSet, PurchaseOrderViewSet, SupplierViewSet
-from apps.tenants.views import PlatformPaymentViewSet, PlatformTenantViewSet, PlatformViewSet, TenantContextViewSet, TenantViewSet
+from apps.tenants.views import PlatformBranchViewSet, PlatformPaymentViewSet, PlatformTenantViewSet, PlatformUserViewSet, PlatformViewSet, TenantContextViewSet, TenantViewSet
 
 router = DefaultRouter()
 
@@ -27,6 +27,8 @@ router.register("tenants", TenantViewSet, basename="tenant")
 router.register("tenant-context", TenantContextViewSet, basename="tenant-context")
 router.register("platform/tenants", PlatformTenantViewSet, basename="platform-tenant")
 router.register("platform/payments", PlatformPaymentViewSet, basename="platform-payment")
+router.register("platform/branches", PlatformBranchViewSet, basename="platform-branch")
+router.register("platform/users", PlatformUserViewSet, basename="platform-user")
 router.register("platform", PlatformViewSet, basename="platform")
 
 # ── Catalog ───────────────────────────────────────────────────────────────────

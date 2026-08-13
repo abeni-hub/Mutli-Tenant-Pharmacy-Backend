@@ -20,7 +20,7 @@ from core.api.permissions import (
     CanProcessSale,
     CanViewFinancials,
     HasActiveSubscription,
-    IsOwnerOrManager,
+    IsOwner,
     TenantMembershipPermission,
 )
 
@@ -53,7 +53,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         if self.action == "resume":
             return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), CanProcessSale()]
         if self.action in {"cancel", "refund"}:
-            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), IsOwnerOrManager()]
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), IsOwner()]
         return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription()]
 
     def get_serializer_class(self):
@@ -141,7 +141,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["post"],
         url_path="cancel",
-        permission_classes=[IsAuthenticated, TenantMembershipPermission, HasActiveSubscription, IsOwnerOrManager],
+        permission_classes=[IsAuthenticated, TenantMembershipPermission, HasActiveSubscription, IsOwner],
     )
     def cancel(self, request, pk=None):
         serializer = SaleCancelSerializer(data=request.data)
@@ -164,7 +164,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["post"],
         url_path="refund",
-        permission_classes=[IsAuthenticated, TenantMembershipPermission, HasActiveSubscription, IsOwnerOrManager],
+        permission_classes=[IsAuthenticated, TenantMembershipPermission, HasActiveSubscription, IsOwner],
     )
     def refund(self, request, pk=None):
         serializer = SaleRefundInputSerializer(data=request.data)

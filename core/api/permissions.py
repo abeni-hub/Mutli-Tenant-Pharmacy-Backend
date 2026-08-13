@@ -97,34 +97,16 @@ class IsOwner(TenantRolePermission):
     message = "Only Owners can perform this action."
 
 
-class IsManager(TenantRolePermission):
-    """Grants access to users with the Manager role."""
-    required_roles = (Membership.Role.MANAGER,)
-    message = "Only Managers can perform this action."
-
-
 class IsCashier(TenantRolePermission):
     """Grants access to users with the Cashier role."""
     required_roles = (Membership.Role.CASHIER,)
     message = "Only Cashiers can perform this action."
 
 
-class IsInventoryManager(TenantRolePermission):
-    """Grants access to users with the Inventory Manager role."""
-    required_roles = (Membership.Role.INVENTORY_MANAGER,)
-    message = "Only Inventory Managers can perform this action."
-
-
 class IsPharmacist(TenantRolePermission):
     """Grants access to users with the Pharmacist role."""
     required_roles = (Membership.Role.PHARMACIST,)
     message = "Only Pharmacists can perform this action."
-
-
-class IsAccountant(TenantRolePermission):
-    """Grants access to users with the Accountant role."""
-    required_roles = (Membership.Role.ACCOUNTANT,)
-    message = "Only Accountants can perform this action."
 
 
 class IsTenantSuperAdmin(TenantRolePermission):
@@ -134,12 +116,6 @@ class IsTenantSuperAdmin(TenantRolePermission):
 
 
 # ── Convenience composite permissions ─────────────────────────────────────────
-
-class IsOwnerOrManager(TenantRolePermission):
-    """Owner OR Manager — general management tasks."""
-    required_roles = (Membership.Role.OWNER, Membership.Role.MANAGER)
-    message = "Only Owners or Managers can perform this action."
-
 
 class IsOwnerOrSuperAdmin(TenantRolePermission):
     """Owner OR Tenant Super Admin — elevated administration."""
@@ -151,72 +127,63 @@ class CanManageInventory(TenantRolePermission):
     """Roles that can create/update inventory records."""
     required_roles = (
         Membership.Role.OWNER,
-        Membership.Role.MANAGER,
-        Membership.Role.INVENTORY_MANAGER,
+        Membership.Role.PHARMACIST,
     )
-    message = "Only Owners, Managers, or Inventory Managers can manage inventory."
+    message = "Only Owners or Pharmacists can manage inventory."
 
 
 class CanDispense(TenantRolePermission):
     """Roles that can dispense medication (process prescriptions)."""
     required_roles = (
         Membership.Role.OWNER,
-        Membership.Role.MANAGER,
         Membership.Role.PHARMACIST,
     )
-    message = "Only Owners, Managers, or Pharmacists can dispense medication."
+    message = "Only Owners or Pharmacists can dispense medication."
 
 
 class CanProcessSale(TenantRolePermission):
     """Roles that can record / finalise a sale."""
     required_roles = (
         Membership.Role.OWNER,
-        Membership.Role.MANAGER,
         Membership.Role.CASHIER,
         Membership.Role.PHARMACIST,
     )
-    message = "Only Owners, Managers, Cashiers, or Pharmacists can process sales."
+    message = "Only Owners, Cashiers, or Pharmacists can process sales."
 
 
 class CanAccessSales(TenantRolePermission):
     """Roles that can view and operate sales data."""
     required_roles = (
         Membership.Role.OWNER,
-        Membership.Role.MANAGER,
         Membership.Role.CASHIER,
+        Membership.Role.PHARMACIST,
     )
-    message = "Only Owners, Managers, or Cashiers can access sales data."
+    message = "Only Owners, Cashiers, or Pharmacists can access sales data."
 
 
 class CanAccessPurchases(TenantRolePermission):
     """Roles that can view and manage purchasing data."""
     required_roles = (
         Membership.Role.OWNER,
-        Membership.Role.MANAGER,
-        Membership.Role.ACCOUNTANT,
+        Membership.Role.PHARMACIST,
     )
-    message = "Only Owners, Managers, or Accountants can access purchasing data."
+    message = "Only Owners or Pharmacists can access purchasing data."
 
 
 class CanViewFinancials(TenantRolePermission):
     """Roles that can access financial reports."""
     required_roles = (
         Membership.Role.OWNER,
-        Membership.Role.MANAGER,
-        Membership.Role.ACCOUNTANT,
     )
-    message = "Only Owners, Managers, or Accountants can view financial data."
+    message = "Only Owners can view financial data."
 
 
 class IsAnyStaff(TenantRolePermission):
     """Any tenant member — broadest role gate, equivalent to TenantMembership."""
     required_roles = (
         Membership.Role.OWNER,
-        Membership.Role.MANAGER,
         Membership.Role.CASHIER,
-        Membership.Role.INVENTORY_MANAGER,
         Membership.Role.PHARMACIST,
-        Membership.Role.ACCOUNTANT,
         Membership.Role.SUPER_ADMIN,
     )
     message = "Active tenant membership required."

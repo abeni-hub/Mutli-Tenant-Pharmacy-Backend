@@ -1,9 +1,13 @@
 from rest_framework import serializers
 
-from apps.tenants.models import Membership, Tenant
+from apps.tenants.models import Branch, Membership, Tenant
 
 
 class TenantSerializer(serializers.ModelSerializer):
+    owner_email = serializers.SerializerMethodField()
+    branch_count = serializers.SerializerMethodField()
+    subscription_status = serializers.SerializerMethodField()
+
     class Meta:
         model = Tenant
         fields = (
@@ -13,8 +17,22 @@ class TenantSerializer(serializers.ModelSerializer):
             "registration_number",
             "is_active",
             "created_at",
+            "owner_email",
+            "branch_count",
+            "subscription_status",
         )
-        read_only_fields = ("id", "slug", "is_active", "created_at")
+        read_only_fields = ("id", "slug", "is_active", "created_at", "owner_email", "branch_count", "subscription_status")
+
+    def get_owner_email(self, obj: Tenant) -> str:
+        owner_membership = obj.memberships.filter(role=Membership.Role.OWNER, is_active=True).select_related("user").first()
+        return owner_membership.user.email if owner_membership else ""
+
+    def get_branch_count(self, obj: Tenant) -> int:
+        return obj.branches.filter(is_active=True).count()
+
+    def get_subscription_status(self, obj: Tenant) -> str:
+        sub = getattr(obj, "subscription", None)
+        return sub.status if sub else "active"
 
 
 class TenantCreateSerializer(serializers.Serializer):
@@ -42,3 +60,33 @@ class MembershipSerializer(serializers.ModelSerializer):
             "joined_at",
         )
         read_only_fields = ("id", "user_email", "user_full_name", "role_display", "joined_at")
+
+
+class BranchSerializer(serializers.ModelSerializer):
+    tenant_name = serializers.CharField(source="tenant.name", read_only=True)
+
+    class Meta:
+        model = Branch
+        fields = (
+            "id",
+            "tenant",
+            "tenant_name",
+            "name",
+            "code",
+            "address",
+            "phone",
+            "is_main",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "tenant_name", "created_at", "updated_at")
+
+
+class BranchCreateSerializer(serializers.Serializer):
+    tenant_id = serializers.UUIDField()
+    name = serializers.CharField(max_length=200)
+    code = serializers.CharField(max_length=50)
+    address = serializers.CharField(required=False, allow_blank=True, default="")
+    phone = serializers.CharField(required=False, allow_blank=True, default="")
+    is_main = serializers.BooleanField(required=False, default=False)

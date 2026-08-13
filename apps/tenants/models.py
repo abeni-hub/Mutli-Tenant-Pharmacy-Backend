@@ -19,11 +19,8 @@ class Tenant(UUIDModel):
 class Membership(UUIDModel):
     class Role(models.TextChoices):
         OWNER = "owner", "Owner"
-        MANAGER = "manager", "Manager"
         CASHIER = "cashier", "Cashier"
-        INVENTORY_MANAGER = "inventory_manager", "Inventory Manager"
         PHARMACIST = "pharmacist", "Pharmacist"
-        ACCOUNTANT = "accountant", "Accountant"
         SUPER_ADMIN = "super_admin", "Super Admin"
 
     tenant = models.ForeignKey(
@@ -52,3 +49,28 @@ class Membership(UUIDModel):
 
     def __str__(self) -> str:
         return f"{self.user} – {self.role} @ {self.tenant}"
+
+
+class Branch(UUIDModel):
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="branches"
+    )
+    name = models.CharField(max_length=200)
+    code = models.CharField(max_length=50)
+    address = models.TextField(blank=True)
+    phone = models.CharField(max_length=50, blank=True)
+    is_main = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant", "code"), name="unique_tenant_branch_code"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.code}) @ {self.tenant.name}"

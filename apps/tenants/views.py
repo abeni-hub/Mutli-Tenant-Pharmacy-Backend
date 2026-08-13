@@ -11,8 +11,8 @@ from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
 from apps.subscriptions.models import PaymentRequest, SubscriptionNotification, SubscriptionPlan, TenantSubscription
 from apps.subscriptions.services import SubscriptionService
-from apps.tenants.models import Membership, Tenant
-from apps.tenants.serializers import TenantCreateSerializer, TenantSerializer
+from apps.tenants.models import Branch, Membership, Tenant
+from apps.tenants.serializers import BranchCreateSerializer, BranchSerializer, TenantCreateSerializer, TenantSerializer
 from apps.tenants.services import TenantCreateData, TenantService
 from core.api.permissions import IsPlatformSuperAdmin, TenantMembershipPermission
 
@@ -79,6 +79,10 @@ class PlatformViewSet(viewsets.ViewSet):
         active_tenant_count = tenants.filter(is_active=True).count()
         inactive_tenant_count = tenant_count - active_tenant_count
 
+        total_branches = Branch.objects.count()
+        total_users = User.objects.count()
+        pending_payments = PaymentRequest.objects.filter(status=PaymentRequest.Status.PENDING).count()
+
         monthly_revenue = TenantSubscription.objects.filter(status=TenantSubscription.Status.ACTIVE).aggregate(
             total=Sum("plan__price_monthly")
         )["total"] or 0
@@ -110,10 +114,20 @@ class PlatformViewSet(viewsets.ViewSet):
 
         return Response(
             {
+                "total_tenants": tenant_count,
+                "active_tenants": active_tenant_count,
+                "suspended_tenants": inactive_tenant_count,
+                "branch_count": total_branches,
+                "total_users": total_users,
+                "pending_payments": pending_payments,
+                "total_revenue": float(monthly_revenue * 12 + annual_revenue),
                 "totals": {
                     "tenant_count": tenant_count,
                     "active_tenant_count": active_tenant_count,
                     "inactive_tenant_count": inactive_tenant_count,
+                    "branch_count": total_branches,
+                    "user_count": total_users,
+                    "pending_payments": pending_payments,
                     "monthly_revenue": float(monthly_revenue),
                     "annual_revenue": float(annual_revenue),
                 },
@@ -137,6 +151,36 @@ class PlatformViewSet(viewsets.ViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["get"], url_path="reports/export")
+    def export_reports(self, request):
+        import csv
+        from django.http import HttpResponse
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_reports.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Tenant Name", "Registration Number", "Status", "Owner Email", "Branch Count", "Created At"])
+        for tenant in Tenant.objects.all():
+            owner_membership = tenant.memberships.filter(role=Membership.Role.OWNER, is_active=True).first()
+            owner_email = owner_membership.user.email if owner_membership else ""
+            writer.writerow([tenant.name, tenant.registration_number, "Active" if tenant.is_active else "Suspended", owner_email, tenant.branches.count(), tenant.created_at.isoformat()])
+        return response
+
+    @action(detail=False, methods=["get"], url_path="analytics/export")
+    def export_analytics(self, request):
+        import csv
+        from django.http import HttpResponse
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_analytics.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Metric", "Value"])
+        writer.writerow(["Total Tenants", Tenant.objects.count()])
+        writer.writerow(["Active Tenants", Tenant.objects.filter(is_active=True).count()])
+        writer.writerow(["Suspended Tenants", Tenant.objects.filter(is_active=False).count()])
+        writer.writerow(["Total Branches", Branch.objects.count()])
+        writer.writerow(["Total Users", User.objects.count()])
+        writer.writerow(["Pending Payments", PaymentRequest.objects.filter(status=PaymentRequest.Status.PENDING).count()])
+        return response
 
     @action(detail=False, methods=["get"], url_path="subscriptions")
     def subscriptions(self, request):
@@ -424,3 +468,62 @@ class PlatformPaymentViewSet(viewsets.ViewSet):
             return PaymentRequest.objects.get(id=pk)
         except PaymentRequest.DoesNotExist as exc:
             raise NotFound("Payment request not found.") from exc
+
+
+class PlatformBranchViewSet(viewsets.ViewSet):
+    permission_classes = (IsAuthenticated, IsPlatformSuperAdmin)
+
+    def list(self, request):
+        branches = Branch.objects.select_related("tenant").order_by("name")
+        return Response(BranchSerializer(branches, many=True).data, status=status.HTTP_200_OK)
+
+    def create(self, request):
+        serializer = BranchCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            tenant = Tenant.objects.get(id=serializer.validated_data["tenant_id"])
+        except Tenant.DoesNotExist:
+            raise NotFound("Tenant not found.")
+        branch = Branch.objects.create(
+            tenant=tenant,
+            name=serializer.validated_data["name"],
+            code=serializer.validated_data["code"],
+            address=serializer.validated_data.get("address", ""),
+            phone=serializer.validated_data.get("phone", ""),
+            is_main=serializer.validated_data.get("is_main", False),
+        )
+        AuditService.record(
+            tenant=tenant,
+            actor=request.user,
+            action="create",
+            entity_type="tenants.Branch",
+            entity_id=branch.id,
+            metadata={"name": branch.name, "code": branch.code},
+        )
+        return Response(BranchSerializer(branch).data, status=status.HTTP_201_CREATED)
+
+
+class PlatformUserViewSet(viewsets.ViewSet):
+    permission_classes = (IsAuthenticated, IsPlatformSuperAdmin)
+
+    def list(self, request):
+        users = User.objects.prefetch_related("memberships__tenant").order_by("email")
+        results = []
+        for u in users:
+            primary_membership = u.memberships.filter(is_active=True).first()
+            role = "super_admin" if u.is_superuser else (primary_membership.role if primary_membership else "user")
+            tenant_name = primary_membership.tenant.name if primary_membership and primary_membership.tenant else "System"
+            results.append({
+                "id": str(u.id),
+                "email": u.email,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "full_name": u.full_name,
+                "phone_number": u.phone_number,
+                "role": role,
+                "tenant_name": tenant_name,
+                "is_active": u.is_active,
+                "is_superuser": u.is_superuser,
+                "date_joined": u.date_joined.isoformat(),
+            })
+        return Response(results, status=status.HTTP_200_OK)

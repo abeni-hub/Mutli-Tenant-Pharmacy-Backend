@@ -15,7 +15,7 @@ from apps.subscriptions.models import (
     SubscriptionPlan,
     TenantSubscription,
 )
-from apps.tenants.models import Membership, Tenant
+from apps.tenants.models import Branch, Membership, Tenant
 
 
 class Command(BaseCommand):
@@ -106,6 +106,10 @@ class Command(BaseCommand):
                 "reg_no": "MP-8801",
                 "plan_code": SubscriptionPlan.Code.ENTERPRISE,
                 "sub_status": TenantSubscription.Status.ACTIVE,
+                "branches": [
+                    {"name": "Main Branch", "code": "MP-MAIN", "address": "Bole Road, Addis Ababa", "phone": "+251911000001", "is_main": True},
+                    {"name": "Bole Branch", "code": "MP-BOLE", "address": "Bole Medhanialem, Addis Ababa", "phone": "+251911000002", "is_main": False},
+                ],
             },
             {
                 "name": "Abeni Community Pharmacy",
@@ -115,6 +119,9 @@ class Command(BaseCommand):
                 "reg_no": "ACP-4402",
                 "plan_code": SubscriptionPlan.Code.PROFESSIONAL,
                 "sub_status": TenantSubscription.Status.ACTIVE,
+                "branches": [
+                    {"name": "Main Branch", "code": "ACP-MAIN", "address": "Kazanchis, Addis Ababa", "phone": "+251911000003", "is_main": True},
+                ],
             },
             {
                 "name": "Addis Health Pharmacy",
@@ -124,6 +131,9 @@ class Command(BaseCommand):
                 "reg_no": "AHP-9903",
                 "plan_code": SubscriptionPlan.Code.STARTER,
                 "sub_status": TenantSubscription.Status.ACTIVE,
+                "branches": [
+                    {"name": "Main Branch", "code": "AHP-MAIN", "address": "Piassa, Addis Ababa", "phone": "+251911000004", "is_main": True},
+                ],
             },
             {
                 "name": "Demo Suspended Pharmacy",
@@ -133,6 +143,9 @@ class Command(BaseCommand):
                 "reg_no": "DSP-1104",
                 "plan_code": SubscriptionPlan.Code.STARTER,
                 "sub_status": TenantSubscription.Status.EXPIRED,
+                "branches": [
+                    {"name": "Main Branch", "code": "DSP-MAIN", "address": "Sarbet, Addis Ababa", "phone": "+251911000005", "is_main": True},
+                ],
             },
         ]
 
@@ -166,6 +179,20 @@ class Command(BaseCommand):
                 defaults={"role": Membership.Role.OWNER, "is_active": True},
             )
 
+            # Seed branches
+            for bspec in spec.get("branches", []):
+                Branch.objects.update_or_create(
+                    tenant=tenant,
+                    code=bspec["code"],
+                    defaults={
+                        "name": bspec["name"],
+                        "address": bspec["address"],
+                        "phone": bspec["phone"],
+                        "is_main": bspec["is_main"],
+                        "is_active": spec["is_active"],
+                    },
+                )
+
             # Tenant Subscription
             plan = plans_dict[spec["plan_code"]]
             now = timezone.now()
@@ -182,8 +209,27 @@ class Command(BaseCommand):
                 },
             )
 
-        # 4. Payment Requests
+        # 4. Seed additional staff members for supported roles (Pharmacist & Cashier)
         meridian_tenant = Tenant.objects.get(slug="meridian-pharma")
+        staff_specs = [
+            ("pharmacist.meridian@abeni.test", "Pharmacist", "Meridian", Membership.Role.PHARMACIST),
+            ("cashier.meridian@abeni.test", "Cashier", "Meridian", Membership.Role.CASHIER),
+        ]
+        for email, first_name, last_name, role in staff_specs:
+            user, created = User.objects.get_or_create(
+                email=email,
+                defaults={"first_name": first_name, "last_name": last_name, "is_active": True},
+            )
+            if created:
+                user.set_password("SecurePassword123!")
+                user.save(update_fields=["password"])
+            Membership.objects.update_or_create(
+                tenant=meridian_tenant,
+                user=user,
+                defaults={"role": role, "is_active": True},
+            )
+
+        # 5. Payment Requests
         abeni_tenant = Tenant.objects.get(slug="abeni-community-pharmacy")
         addis_tenant = Tenant.objects.get(slug="addis-health-pharmacy")
 
@@ -244,7 +290,7 @@ class Command(BaseCommand):
                 },
             )
 
-        # 5. Audit Events
+        # 6. Audit Events
         audit_samples = [
             ("create", "tenants.Tenant", meridian_tenant.id, {"name": meridian_tenant.name}),
             ("update", "tenants.Tenant", abeni_tenant.id, {"status": "active"}),
@@ -259,7 +305,7 @@ class Command(BaseCommand):
                 defaults={"actor": super_admin, "metadata": meta},
             )
 
-        # 6. Subscription Notifications
+        # 7. Subscription Notifications
         SubscriptionNotification.objects.get_or_create(
             tenant=abeni_tenant,
             notification_type=SubscriptionNotification.Type.EXPIRING_7_DAYS,

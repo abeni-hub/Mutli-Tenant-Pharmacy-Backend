@@ -26,11 +26,8 @@ class Command(BaseCommand):
 
         account_specs = [
             ("owner@abeni.test", "Owner", "User", Membership.Role.OWNER),
-            ("manager@abeni.test", "Manager", "User", Membership.Role.MANAGER),
             ("cashier@abeni.test", "Cashier", "User", Membership.Role.CASHIER),
-            ("inventory@abeni.test", "Inventory", "Manager", Membership.Role.INVENTORY_MANAGER),
             ("pharmacist@abeni.test", "Pharmacist", "User", Membership.Role.PHARMACIST),
-            ("accountant@abeni.test", "Accountant", "User", Membership.Role.ACCOUNTANT),
             ("superadmin@abeni.test", "Super", "Admin", Membership.Role.SUPER_ADMIN),
         ]
 
@@ -63,10 +60,11 @@ class Command(BaseCommand):
 
             user.save()
 
-            Membership.objects.update_or_create(
-                tenant=tenant,
-                user=user,
-                defaults={"role": role, "is_active": True},
-            )
+            if not is_super:
+                Membership.objects.update_or_create(
+                    tenant=tenant,
+                    user=user,
+                    defaults={"role": role, "is_active": True},
+                )
 
         self.stdout.write(self.style.SUCCESS("Seeded demo tenant and accounts."))
