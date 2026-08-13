@@ -12,11 +12,8 @@ class TestAuthSystemAllRoles:
         self.client = APIClient()
         self.roles = [
             ("owner@abeni.test", Membership.Role.OWNER, "Owner", "User"),
-            ("manager@abeni.test", Membership.Role.MANAGER, "Manager", "User"),
             ("cashier@abeni.test", Membership.Role.CASHIER, "Cashier", "User"),
-            ("inventory@abeni.test", Membership.Role.INVENTORY_MANAGER, "Inventory", "Manager"),
             ("pharmacist@abeni.test", Membership.Role.PHARMACIST, "Pharmacist", "User"),
-            ("accountant@abeni.test", Membership.Role.ACCOUNTANT, "Accountant", "User"),
             ("superadmin@abeni.test", Membership.Role.SUPER_ADMIN, "Super", "Admin"),
         ]
 
@@ -170,11 +167,8 @@ class TestAuthSystemAllRoles:
 
         # Create members for all other 6 roles
         other_roles = [
-            Membership.Role.MANAGER,
             Membership.Role.CASHIER,
-            Membership.Role.INVENTORY_MANAGER,
             Membership.Role.PHARMACIST,
-            Membership.Role.ACCOUNTANT,
             Membership.Role.SUPER_ADMIN,
         ]
         for role in other_roles:

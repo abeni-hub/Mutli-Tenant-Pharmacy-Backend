@@ -19,7 +19,7 @@ from core.api.permissions import (
     CanManageInventory,
     CanViewFinancials,
     HasActiveSubscription,
-    IsOwnerOrManager,
+    IsOwner,
     TenantMembershipPermission,
 )
 
@@ -92,7 +92,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if self.action in {"list", "retrieve", "create", "summary", "supplier_performance", "trends", "costs", "outstanding", "received", "supplier_spend"}:
             return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), CanAccessPurchases()]
         if self.action in {"approve", "cancel"}:
-            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), IsOwnerOrManager()]
+            return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription(), IsOwner()]
         return [IsAuthenticated(), TenantMembershipPermission(), HasActiveSubscription()]
 
     def create(self, request, *args, **kwargs):
@@ -129,7 +129,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         )
         return Response(PurchaseOrderSerializer(purchase_order).data, status=status.HTTP_201_CREATED)
 
-    @action(detail=True, methods=["post"], url_path="approve", permission_classes=[IsAuthenticated, TenantMembershipPermission, HasActiveSubscription, IsOwnerOrManager])
+    @action(detail=True, methods=["post"], url_path="approve", permission_classes=[IsAuthenticated, TenantMembershipPermission, HasActiveSubscription, IsOwner])
     def approve(self, request, pk=None):
         purchase_order = self.get_object()
         purchase_order = PurchaseService.approve_purchase(purchase_order=purchase_order, performed_by=request.user)
@@ -148,7 +148,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         )
         return Response(PurchaseOrderSerializer(purchase_order).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=["post"], url_path="cancel", permission_classes=[IsAuthenticated, TenantMembershipPermission, HasActiveSubscription, IsOwnerOrManager])
+    @action(detail=True, methods=["post"], url_path="cancel", permission_classes=[IsAuthenticated, TenantMembershipPermission, HasActiveSubscription, IsOwner])
     def cancel(self, request, pk=None):
         purchase_order = self.get_object()
         purchase_order = PurchaseService.cancel_purchase(purchase_order=purchase_order, reason="", performed_by=request.user)

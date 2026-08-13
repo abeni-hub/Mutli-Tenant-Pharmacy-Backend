@@ -26,11 +26,8 @@ class Command(BaseCommand):
 
         account_specs = [
             ("owner@abeni.test", "Owner", "User", Membership.Role.OWNER),
-            ("manager@abeni.test", "Manager", "User", Membership.Role.MANAGER),
             ("cashier@abeni.test", "Cashier", "User", Membership.Role.CASHIER),
-            ("inventory@abeni.test", "Inventory", "Manager", Membership.Role.INVENTORY_MANAGER),
             ("pharmacist@abeni.test", "Pharmacist", "User", Membership.Role.PHARMACIST),
-            ("accountant@abeni.test", "Accountant", "User", Membership.Role.ACCOUNTANT),
             ("superadmin@abeni.test", "Super", "Admin", Membership.Role.SUPER_ADMIN),
         ]
 
@@ -52,21 +49,22 @@ class Command(BaseCommand):
             if user.last_name != last_name:
                 user.last_name = last_name
                 update_fields.append("last_name")
-            if is_super and (not user.is_superuser or not user.is_staff):
+            user.failed_login_attempts = 0
+            user.locked_until = None
+            user.is_active = True
+            if is_super:
                 user.is_superuser = True
                 user.is_staff = True
-                update_fields.extend(["is_superuser", "is_staff"])
             if not user.check_password(password):
                 user.set_password(password)
-                update_fields.append("password")
 
-            if update_fields:
-                user.save(update_fields=list(set(update_fields)))
+            user.save()
 
-            Membership.objects.update_or_create(
-                tenant=tenant,
-                user=user,
-                defaults={"role": role, "is_active": True},
-            )
+            if not is_super:
+                Membership.objects.update_or_create(
+                    tenant=tenant,
+                    user=user,
+                    defaults={"role": role, "is_active": True},
+                )
 
         self.stdout.write(self.style.SUCCESS("Seeded demo tenant and accounts."))

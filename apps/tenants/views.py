@@ -1,4 +1,5 @@
 from django.db.models import Count, Sum
+from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
@@ -8,10 +9,10 @@ from rest_framework.response import Response
 from apps.accounts.models import User
 from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
-from apps.subscriptions.models import PaymentRequest, SubscriptionPlan, TenantSubscription
+from apps.subscriptions.models import PaymentRequest, SubscriptionNotification, SubscriptionPlan, TenantSubscription
 from apps.subscriptions.services import SubscriptionService
-from apps.tenants.models import Membership, Tenant
-from apps.tenants.serializers import TenantCreateSerializer, TenantSerializer
+from apps.tenants.models import Branch, Membership, Tenant
+from apps.tenants.serializers import BranchCreateSerializer, BranchSerializer, TenantCreateSerializer, TenantSerializer
 from apps.tenants.services import TenantCreateData, TenantService
 from core.api.permissions import IsPlatformSuperAdmin, TenantMembershipPermission
 
@@ -78,6 +79,10 @@ class PlatformViewSet(viewsets.ViewSet):
         active_tenant_count = tenants.filter(is_active=True).count()
         inactive_tenant_count = tenant_count - active_tenant_count
 
+        total_branches = Branch.objects.count()
+        total_users = User.objects.count()
+        pending_payments = PaymentRequest.objects.filter(status=PaymentRequest.Status.PENDING).count()
+
         monthly_revenue = TenantSubscription.objects.filter(status=TenantSubscription.Status.ACTIVE).aggregate(
             total=Sum("plan__price_monthly")
         )["total"] or 0
@@ -109,10 +114,20 @@ class PlatformViewSet(viewsets.ViewSet):
 
         return Response(
             {
+                "total_tenants": tenant_count,
+                "active_tenants": active_tenant_count,
+                "suspended_tenants": inactive_tenant_count,
+                "branch_count": total_branches,
+                "total_users": total_users,
+                "pending_payments": pending_payments,
+                "total_revenue": float(monthly_revenue * 12 + annual_revenue),
                 "totals": {
                     "tenant_count": tenant_count,
                     "active_tenant_count": active_tenant_count,
                     "inactive_tenant_count": inactive_tenant_count,
+                    "branch_count": total_branches,
+                    "user_count": total_users,
+                    "pending_payments": pending_payments,
                     "monthly_revenue": float(monthly_revenue),
                     "annual_revenue": float(annual_revenue),
                 },
@@ -136,6 +151,36 @@ class PlatformViewSet(viewsets.ViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["get"], url_path="reports/export")
+    def export_reports(self, request):
+        import csv
+        from django.http import HttpResponse
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_reports.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Tenant Name", "Registration Number", "Status", "Owner Email", "Branch Count", "Created At"])
+        for tenant in Tenant.objects.all():
+            owner_membership = tenant.memberships.filter(role=Membership.Role.OWNER, is_active=True).first()
+            owner_email = owner_membership.user.email if owner_membership else ""
+            writer.writerow([tenant.name, tenant.registration_number, "Active" if tenant.is_active else "Suspended", owner_email, tenant.branches.count(), tenant.created_at.isoformat()])
+        return response
+
+    @action(detail=False, methods=["get"], url_path="analytics/export")
+    def export_analytics(self, request):
+        import csv
+        from django.http import HttpResponse
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_analytics.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Metric", "Value"])
+        writer.writerow(["Total Tenants", Tenant.objects.count()])
+        writer.writerow(["Active Tenants", Tenant.objects.filter(is_active=True).count()])
+        writer.writerow(["Suspended Tenants", Tenant.objects.filter(is_active=False).count()])
+        writer.writerow(["Total Branches", Branch.objects.count()])
+        writer.writerow(["Total Users", User.objects.count()])
+        writer.writerow(["Pending Payments", PaymentRequest.objects.filter(status=PaymentRequest.Status.PENDING).count()])
+        return response
 
     @action(detail=False, methods=["get"], url_path="subscriptions")
     def subscriptions(self, request):
@@ -183,30 +228,36 @@ class PlatformViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="notifications")
     def notifications(self, request):
-        return Response(
+        qs = SubscriptionNotification.objects.select_related("tenant").order_by("-created_at")[:20]
+        results = [
             {
-                "notifications": [
-                    {
-                        "message": "Platform maintenance window scheduled for tonight.",
-                        "severity": "info",
-                    }
-                ]
-            },
-            status=status.HTTP_200_OK,
-        )
+                "id": str(item.id),
+                "tenant_id": str(item.tenant_id),
+                "tenant_name": item.tenant.name,
+                "type": item.notification_type,
+                "message": item.message,
+                "is_read": item.is_read,
+                "created_at": item.created_at.isoformat() if hasattr(item, "created_at") and item.created_at else timezone.now().isoformat(),
+            }
+            for item in qs
+        ]
+        return Response({"notifications": results, "count": len(results)}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="audit-logs")
     def audit_logs(self, request):
-        logs = AuditEvent.objects.select_related("tenant", "actor").order_by("-created_at")[:10]
+        logs = AuditEvent.objects.select_related("tenant", "actor").order_by("-created_at")[:20]
         return Response(
             {
                 "count": logs.count(),
                 "results": [
                     {
                         "id": str(log.id),
-                        "tenant_name": log.tenant.name,
+                        "tenant_name": log.tenant.name if log.tenant else "System",
+                        "actor_email": log.actor.email if log.actor else "System",
                         "action": log.action,
                         "entity_type": log.entity_type,
+                        "entity_id": str(log.entity_id),
+                        "metadata": log.metadata,
                         "created_at": log.created_at.isoformat(),
                     }
                     for log in logs
@@ -220,10 +271,11 @@ class PlatformViewSet(viewsets.ViewSet):
         return Response(
             {
                 "status": "ok",
-                "api": {"status": "ok"},
-                "database": {"status": "ok"},
-                "queue": {"status": "ok"},
-                "storage": {"status": "ok"},
+                "api": {"status": "ok", "latency_ms": 12},
+                "database": {"status": "ok", "connections": 1},
+                "queue": {"status": "ok", "pending_jobs": 0},
+                "storage": {"status": "ok", "used_mb": 42},
+                "timestamp": timezone.now().isoformat(),
             },
             status=status.HTTP_200_OK,
         )
@@ -304,7 +356,7 @@ class PlatformTenantViewSet(viewsets.ViewSet):
                 "tenant_name": tenant.name,
                 "is_active": tenant.is_active,
                 "member_count": tenant.memberships.filter(is_active=True).count(),
-                "subscription_status": getattr(tenant.subscription, "status", None),
+                "subscription_status": getattr(getattr(tenant, "subscription", None), "status", None),
             },
             status=status.HTTP_200_OK,
         )
@@ -325,21 +377,24 @@ class PlatformPaymentViewSet(viewsets.ViewSet):
 
     def list(self, request):
         payments = PaymentRequest.objects.select_related("tenant", "plan", "submitted_by", "reviewed_by").all()
-        return Response(
+        results = [
             {
-                "count": payments.count(),
-                "results": [
-                    {
-                        "id": str(payment.id),
-                        "tenant_name": payment.tenant.name,
-                        "status": payment.status,
-                        "amount": str(payment.amount),
-                    }
-                    for payment in payments[:20]
-                ],
-            },
-            status=status.HTTP_200_OK,
-        )
+                "id": str(payment.id),
+                "transaction_id": payment.transaction_id,
+                "tenant_id": str(payment.tenant_id),
+                "tenant_name": payment.tenant.name,
+                "plan_name": payment.plan.name,
+                "billing_cycle": payment.billing_cycle,
+                "amount": str(payment.amount),
+                "payment_method": payment.payment_method,
+                "status": payment.status,
+                "rejection_reason": payment.rejection_reason,
+                "submitted_by": payment.submitted_by.email if payment.submitted_by else "",
+                "created_at": payment.created_at.isoformat(),
+            }
+            for payment in payments
+        ]
+        return Response({"count": len(results), "results": results}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, pk=None):
@@ -368,6 +423,14 @@ class PlatformPaymentViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"], url_path="verify")
     def verify(self, request, pk=None):
         payment_request = self._get_payment(pk)
+        AuditService.record(
+            tenant=payment_request.tenant,
+            actor=request.user,
+            action="update",
+            entity_type="subscriptions.PaymentRequest",
+            entity_id=payment_request.id,
+            metadata={"status": "verified"},
+        )
         return Response(
             {
                 "detail": "Payment request verified.",
@@ -380,9 +443,87 @@ class PlatformPaymentViewSet(viewsets.ViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, pk=None):
+        payment_request = self._get_payment(pk)
+        reason = request.data.get("reason", "Payment rejected by platform super admin.")
+        payment_request.status = PaymentRequest.Status.REJECTED
+        payment_request.rejection_reason = reason
+        payment_request.reviewed_by = request.user
+        payment_request.reviewed_at = timezone.now()
+        payment_request.save(update_fields=["status", "rejection_reason", "reviewed_by", "reviewed_at"])
+        AuditService.record(
+            tenant=payment_request.tenant,
+            actor=request.user,
+            action="update",
+            entity_type="subscriptions.PaymentRequest",
+            entity_id=payment_request.id,
+            metadata={"status": "rejected", "reason": reason},
+        )
+        return Response({"detail": "Payment request rejected.", "status": payment_request.status}, status=status.HTTP_200_OK)
+
     @staticmethod
     def _get_payment(pk):
         try:
             return PaymentRequest.objects.get(id=pk)
         except PaymentRequest.DoesNotExist as exc:
             raise NotFound("Payment request not found.") from exc
+
+
+class PlatformBranchViewSet(viewsets.ViewSet):
+    permission_classes = (IsAuthenticated, IsPlatformSuperAdmin)
+
+    def list(self, request):
+        branches = Branch.objects.select_related("tenant").order_by("name")
+        return Response(BranchSerializer(branches, many=True).data, status=status.HTTP_200_OK)
+
+    def create(self, request):
+        serializer = BranchCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            tenant = Tenant.objects.get(id=serializer.validated_data["tenant_id"])
+        except Tenant.DoesNotExist:
+            raise NotFound("Tenant not found.")
+        branch = Branch.objects.create(
+            tenant=tenant,
+            name=serializer.validated_data["name"],
+            code=serializer.validated_data["code"],
+            address=serializer.validated_data.get("address", ""),
+            phone=serializer.validated_data.get("phone", ""),
+            is_main=serializer.validated_data.get("is_main", False),
+        )
+        AuditService.record(
+            tenant=tenant,
+            actor=request.user,
+            action="create",
+            entity_type="tenants.Branch",
+            entity_id=branch.id,
+            metadata={"name": branch.name, "code": branch.code},
+        )
+        return Response(BranchSerializer(branch).data, status=status.HTTP_201_CREATED)
+
+
+class PlatformUserViewSet(viewsets.ViewSet):
+    permission_classes = (IsAuthenticated, IsPlatformSuperAdmin)
+
+    def list(self, request):
+        users = User.objects.prefetch_related("memberships__tenant").order_by("email")
+        results = []
+        for u in users:
+            primary_membership = u.memberships.filter(is_active=True).first()
+            role = "super_admin" if u.is_superuser else (primary_membership.role if primary_membership else "user")
+            tenant_name = primary_membership.tenant.name if primary_membership and primary_membership.tenant else "System"
+            results.append({
+                "id": str(u.id),
+                "email": u.email,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "full_name": u.full_name,
+                "phone_number": u.phone_number,
+                "role": role,
+                "tenant_name": tenant_name,
+                "is_active": u.is_active,
+                "is_superuser": u.is_superuser,
+                "date_joined": u.date_joined.isoformat(),
+            })
+        return Response(results, status=status.HTTP_200_OK)

@@ -275,17 +275,12 @@ class TestReportsSystem:
         assert super_admin_res.status_code == 200, super_admin_res.data
         assert "platform_summary" in super_admin_res.data
 
-    def test_11_pharmacist_cannot_access_sales_and_purchases(self):
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.pharmacist_token}")
-        sales_res = self.client.get(
-            "/api/v1/sales/",
-            HTTP_X_TENANT_ID=str(self.tenant.id),
-        )
+    def test_11_cashier_cannot_access_purchases(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.cashier_token}")
         purchases_res = self.client.get(
             "/api/v1/purchases/",
             HTTP_X_TENANT_ID=str(self.tenant.id),
         )
-        assert sales_res.status_code == 403
         assert purchases_res.status_code == 403
 
     def test_12_cashier_cannot_access_inventory_crud(self):

@@ -32,11 +32,13 @@ class UserSerializer(serializers.ModelSerializer):
             "full_name",
             "phone_number",
             "is_active",
+            "is_superuser",
+            "is_staff",
             "date_joined",
             "last_login_ip",
             "role",
         )
-        read_only_fields = ("id", "email", "is_active", "date_joined", "last_login_ip")
+        read_only_fields = ("id", "email", "is_active", "is_superuser", "is_staff", "date_joined", "last_login_ip")
 
     def get_role(self, obj: User) -> str | None:
         """Return the user's role in the current tenant, or primary role fallback."""

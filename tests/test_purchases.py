@@ -20,17 +20,17 @@ class TestPurchasingSystem:
             email="purchasing-owner@abeni.test",
             password="Password123!",
         )
-        self.manager = User.objects.create_user(
-            email="purchasing-manager@abeni.test",
+        self.pharmacist = User.objects.create_user(
+            email="purchasing-pharmacist@abeni.test",
             password="Password123!",
-            first_name="Mina",
-            last_name="Manager",
+            first_name="Pharma",
+            last_name="Staff",
         )
         self.tenant = TenantService.create_for_owner(
             self.owner,
             TenantCreateData(name="Purchase Test Pharmacy"),
         )
-        Membership.objects.create(tenant=self.tenant, user=self.manager, role=Membership.Role.MANAGER)
+        Membership.objects.create(tenant=self.tenant, user=self.pharmacist, role=Membership.Role.PHARMACIST)
 
         plan = SubscriptionPlan.objects.get(code="enterprise")
         TenantSubscription.objects.create(
@@ -50,7 +50,7 @@ class TestPurchasingSystem:
         )
 
         self.owner_token = self._get_token(self.owner)
-        self.manager_token = self._get_token(self.manager)
+        self.pharmacist_token = self._get_token(self.pharmacist)
 
     def _get_token(self, user):
         response = self.client.post(
