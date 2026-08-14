@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.tenants.models import Branch, Membership, Tenant
+from apps.tenants.models import Branch, FeatureFlag, Membership, Tenant, UserInvitation
 
 
 class TenantSerializer(serializers.ModelSerializer):
@@ -90,3 +90,37 @@ class BranchCreateSerializer(serializers.Serializer):
     address = serializers.CharField(required=False, allow_blank=True, default="")
     phone = serializers.CharField(required=False, allow_blank=True, default="")
     is_main = serializers.BooleanField(required=False, default=False)
+
+
+class FeatureFlagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FeatureFlag
+        fields = ("id", "key", "name", "description", "module", "is_enabled", "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class UserInvitationSerializer(serializers.ModelSerializer):
+    tenant_name = serializers.CharField(source="tenant.name", read_only=True, default="")
+    invited_by_email = serializers.CharField(source="invited_by.email", read_only=True)
+
+    class Meta:
+        model = UserInvitation
+        fields = (
+            "id",
+            "email",
+            "tenant",
+            "tenant_name",
+            "role",
+            "token",
+            "status",
+            "invited_by_email",
+            "expires_at",
+            "created_at",
+        )
+        read_only_fields = ("id", "token", "tenant_name", "invited_by_email", "created_at")
+
+
+class UserInviteCreateSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    role = serializers.ChoiceField(choices=Membership.Role.choices, default=Membership.Role.PHARMACIST)
+    tenant_id = serializers.UUIDField(required=False, allow_null=True)

@@ -35,13 +35,15 @@ class TestSalesSystem:
 
         # Active Enterprise subscription
         plan = SubscriptionPlan.objects.get(code="enterprise")
-        TenantSubscription.objects.create(
+        TenantSubscription.objects.update_or_create(
             tenant=self.tenant,
-            plan=plan,
-            status=TenantSubscription.Status.ACTIVE,
-            billing_cycle=TenantSubscription.BillingCycle.YEARLY,
-            starts_at=timezone.now(),
-            expires_at=timezone.now() + timedelta(days=365),
+            defaults={
+                "plan": plan,
+                "status": TenantSubscription.Status.ACTIVE,
+                "billing_cycle": TenantSubscription.BillingCycle.YEARLY,
+                "starts_at": timezone.now(),
+                "expires_at": timezone.now() + timedelta(days=365),
+            },
         )
 
         # Create Products

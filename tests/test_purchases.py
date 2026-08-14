@@ -33,13 +33,15 @@ class TestPurchasingSystem:
         Membership.objects.create(tenant=self.tenant, user=self.pharmacist, role=Membership.Role.PHARMACIST)
 
         plan = SubscriptionPlan.objects.get(code="enterprise")
-        TenantSubscription.objects.create(
+        TenantSubscription.objects.update_or_create(
             tenant=self.tenant,
-            plan=plan,
-            status=TenantSubscription.Status.ACTIVE,
-            billing_cycle=TenantSubscription.BillingCycle.YEARLY,
-            starts_at=timezone.now(),
-            expires_at=timezone.now() + timedelta(days=365),
+            defaults={
+                "plan": plan,
+                "status": TenantSubscription.Status.ACTIVE,
+                "billing_cycle": TenantSubscription.BillingCycle.YEARLY,
+                "starts_at": timezone.now(),
+                "expires_at": timezone.now() + timedelta(days=365),
+            },
         )
 
         self.product = Product.objects.create(

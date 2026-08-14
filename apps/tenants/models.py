@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 
 from core.models import UUIDModel
@@ -74,3 +76,46 @@ class Branch(UUIDModel):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.code}) @ {self.tenant.name}"
+
+
+class FeatureFlag(UUIDModel):
+    key = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    module = models.CharField(max_length=100, default="system")
+    is_enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("key",)
+
+    def __str__(self) -> str:
+        return f"{self.key} ({'ON' if self.is_enabled else 'OFF'})"
+
+
+class UserInvitation(UUIDModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        EXPIRED = "expired", "Expired"
+        CANCELLED = "cancelled", "Cancelled"
+
+    email = models.EmailField()
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="user_invitations", null=True, blank=True
+    )
+    role = models.CharField(max_length=20, choices=Membership.Role.choices, default=Membership.Role.PHARMACIST)
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    invited_by = models.ForeignKey(
+        "accounts.User", on_delete=models.CASCADE, related_name="platform_invitations"
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"Invite for {self.email} ({self.role}) @ {self.tenant or 'Platform'}"

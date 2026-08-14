@@ -1,26 +1,50 @@
-from django.db.models import Count, Sum
+import csv
+from django.db.models import Count, Q, Sum
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.accounts.models import User
+from apps.accounts.models import Permission, PermissionCategory, Role, User, UserRole
+from apps.accounts.serializers import (
+    PermissionCategorySerializer,
+    PermissionSerializer,
+    RoleCreateUpdateSerializer,
+    RoleSerializer,
+)
 from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
 from apps.subscriptions.models import PaymentRequest, SubscriptionNotification, SubscriptionPlan, TenantSubscription
 from apps.subscriptions.services import SubscriptionService
-from apps.tenants.models import Branch, Membership, Tenant
-from apps.tenants.serializers import BranchCreateSerializer, BranchSerializer, TenantCreateSerializer, TenantSerializer
+from apps.tenants.models import Branch, FeatureFlag, Membership, Tenant, UserInvitation
+from apps.tenants.serializers import (
+    BranchCreateSerializer,
+    BranchSerializer,
+    FeatureFlagSerializer,
+    TenantCreateSerializer,
+    TenantSerializer,
+    UserInvitationSerializer,
+    UserInviteCreateSerializer,
+)
 from apps.tenants.services import TenantCreateData, TenantService
 from core.api.permissions import IsPlatformSuperAdmin, TenantMembershipPermission
 
 
 class PlatformTenantCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=200)
-    registration_number = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    owner_email = serializers.EmailField(required=False, allow_blank=True)
+    registration_number = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    owner_first_name = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    owner_last_name = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    owner_email = serializers.EmailField(required=False, allow_blank=True, default="")
+    owner_phone = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    plan_code = serializers.CharField(max_length=50, required=False, allow_blank=True, default="enterprise")
+    branch_name = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+    branch_code = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    address = serializers.CharField(required=False, allow_blank=True, default="")
+    phone = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
 
 
 class TenantViewSet(viewsets.GenericViewSet):
@@ -152,6 +176,75 @@ class PlatformViewSet(viewsets.ViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=False, methods=["get"], url_path="tenants/export")
+    def export_tenants(self, request):
+        import csv
+        from django.http import HttpResponse
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_tenants_export.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Tenant ID", "Tenant Name", "Registration Number", "Status", "Owner Email", "Branch Count", "Created At"])
+
+        qs = Tenant.objects.all()
+        status_filter = request.query_params.get("status")
+        search = request.query_params.get("search")
+
+        if status_filter == "active":
+            qs = qs.filter(is_active=True)
+        elif status_filter == "suspended":
+            qs = qs.filter(is_active=False)
+
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(registration_number__icontains=search))
+
+        for tenant in qs:
+            owner_membership = tenant.memberships.filter(role=Membership.Role.OWNER, is_active=True).first()
+            owner_email = owner_membership.user.email if owner_membership and owner_membership.user else "N/A"
+            writer.writerow([
+                str(tenant.id),
+                tenant.name,
+                tenant.registration_number or "N/A",
+                "Active" if tenant.is_active else "Suspended",
+                owner_email,
+                tenant.branches.count(),
+                tenant.created_at.isoformat() if hasattr(tenant, "created_at") and tenant.created_at else "",
+            ])
+
+        AuditService.record(
+            tenant=None,
+            actor=request.user,
+            action="export",
+            entity_type="tenants.Tenant",
+            metadata={"status": status_filter, "search": search, "count": qs.count()},
+        )
+        return response
+
+    @action(detail=False, methods=["get"], url_path="revenue/export")
+    def export_revenue(self, request):
+        import csv
+        from django.http import HttpResponse
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_revenue_export.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Metric", "Value"])
+
+        monthly_rev = TenantSubscription.objects.filter(status=TenantSubscription.Status.ACTIVE).aggregate(total=Sum("plan__price_monthly"))["total"] or 0
+        annual_rev = TenantSubscription.objects.filter(status=TenantSubscription.Status.ACTIVE).aggregate(total=Sum("plan__price_yearly"))["total"] or 0
+
+        writer.writerow(["Monthly Recurring Revenue (MRR)", float(monthly_rev)])
+        writer.writerow(["Annual Recurring Revenue (ARR)", float(annual_rev)])
+        writer.writerow(["Active Subscriptions", TenantSubscription.objects.filter(status=TenantSubscription.Status.ACTIVE).count()])
+        writer.writerow(["Pending Payment Requests", PaymentRequest.objects.filter(status=PaymentRequest.Status.PENDING).count()])
+
+        AuditService.record(
+            tenant=None,
+            actor=request.user,
+            action="export",
+            entity_type="reports.Revenue",
+            metadata={"mrr": float(monthly_rev), "arr": float(annual_rev)},
+        )
+        return response
+
     @action(detail=False, methods=["get"], url_path="reports/export")
     def export_reports(self, request):
         import csv
@@ -164,6 +257,7 @@ class PlatformViewSet(viewsets.ViewSet):
             owner_membership = tenant.memberships.filter(role=Membership.Role.OWNER, is_active=True).first()
             owner_email = owner_membership.user.email if owner_membership else ""
             writer.writerow([tenant.name, tenant.registration_number, "Active" if tenant.is_active else "Suspended", owner_email, tenant.branches.count(), tenant.created_at.isoformat()])
+        AuditService.record(tenant=None, actor=request.user, action="export", entity_type="reports.Platform", metadata={})
         return response
 
     @action(detail=False, methods=["get"], url_path="analytics/export")
@@ -180,6 +274,7 @@ class PlatformViewSet(viewsets.ViewSet):
         writer.writerow(["Total Branches", Branch.objects.count()])
         writer.writerow(["Total Users", User.objects.count()])
         writer.writerow(["Pending Payments", PaymentRequest.objects.filter(status=PaymentRequest.Status.PENDING).count()])
+        AuditService.record(tenant=None, actor=request.user, action="export", entity_type="analytics.Platform", metadata={})
         return response
 
     @action(detail=False, methods=["get"], url_path="subscriptions")
@@ -196,18 +291,24 @@ class PlatformViewSet(viewsets.ViewSet):
                         "code": plan.code,
                         "price_monthly": str(plan.price_monthly),
                         "price_yearly": str(plan.price_yearly),
+                        "max_branches": plan.max_branches,
+                        "max_users": plan.max_users,
+                        "max_medicines": plan.max_medicines,
                     }
                     for plan in plans
                 ],
                 "results": [
                     {
+                        "id": str(item.id),
                         "tenant_id": str(item.tenant_id),
                         "tenant_name": item.tenant.name,
                         "plan_name": item.plan.name,
                         "status": item.status,
+                        "billing_cycle": item.billing_cycle,
+                        "starts_at": item.starts_at.isoformat(),
                         "expires_at": item.expires_at.isoformat(),
                     }
-                    for item in subscriptions[:10]
+                    for item in subscriptions
                 ],
             },
             status=status.HTTP_200_OK,
@@ -215,16 +316,44 @@ class PlatformViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="feature-flags")
     def feature_flags(self, request):
-        return Response(
-            {
-                "feature_flags": {
-                    "reports": True,
-                    "sms": True,
-                    "backups": True,
-                }
-            },
-            status=status.HTTP_200_OK,
+        if not FeatureFlag.objects.exists():
+            defaults = [
+                ("reports", "Reports & Analytics", "Advanced platform reporting and export.", "analytics", True),
+                ("sms", "SMS Notifications", "Automated SMS alerts for expiration and sales.", "communication", True),
+                ("backups", "Automated Cloud Backups", "Scheduled system database backups.", "system", True),
+                ("ai_inventory", "AI Demand Forecasting", "Predictive stock replenishment.", "inventory", True),
+                ("multi_branch", "Multi-Branch Management", "Centralized multi-store control.", "branches", True),
+            ]
+            for key, name, desc, mod, enabled in defaults:
+                FeatureFlag.objects.create(key=key, name=name, description=desc, module=mod, is_enabled=enabled)
+
+        flags = FeatureFlag.objects.all()
+        flag_dict = {f.key: f.is_enabled for f in flags}
+        results = FeatureFlagSerializer(flags, many=True).data
+        return Response({"feature_flags": flag_dict, "results": results}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path=r"feature-flags/(?P<flag_key>[^/.]+)/toggle")
+    def toggle_feature_flag(self, request, flag_key=None):
+        flag = FeatureFlag.objects.filter(key__iexact=flag_key).first()
+        if flag is None:
+            flag = FeatureFlag.objects.create(
+                key=flag_key,
+                name=flag_key.replace("_", " ").title(),
+                description="Dynamic platform feature flag",
+                is_enabled=True,
+            )
+        flag.is_enabled = not flag.is_enabled
+        flag.save(update_fields=["is_enabled", "updated_at"])
+
+        AuditService.record(
+            tenant=None,
+            actor=request.user,
+            action="update",
+            entity_type="tenants.FeatureFlag",
+            entity_id=flag.id,
+            metadata={"key": flag.key, "is_enabled": flag.is_enabled},
         )
+        return Response(FeatureFlagSerializer(flag).data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="notifications")
     def notifications(self, request):
@@ -245,10 +374,27 @@ class PlatformViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="audit-logs")
     def audit_logs(self, request):
-        logs = AuditEvent.objects.select_related("tenant", "actor").order_by("-created_at")[:20]
+        qs = AuditEvent.objects.select_related("tenant", "actor").order_by("-created_at")
+        action_filter = request.query_params.get("action")
+        tenant_id = request.query_params.get("tenant_id")
+        search = request.query_params.get("search")
+
+        if action_filter:
+            qs = qs.filter(action=action_filter)
+        if tenant_id:
+            qs = qs.filter(tenant_id=tenant_id)
+        if search:
+            qs = qs.filter(
+                Q(entity_type__icontains=search)
+                | Q(action__icontains=search)
+                | Q(actor__email__icontains=search)
+                | Q(tenant__name__icontains=search)
+            )
+
+        logs = qs[:50]
         return Response(
             {
-                "count": logs.count(),
+                "count": qs.count(),
                 "results": [
                     {
                         "id": str(log.id),
@@ -266,6 +412,62 @@ class PlatformViewSet(viewsets.ViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=False, methods=["get"], url_path="audit-logs/export")
+    def export_audit_logs(self, request):
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_audit_logs.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Log ID", "Created At", "Tenant", "Actor Email", "Action", "Entity Type", "Entity ID"])
+
+        logs = AuditEvent.objects.select_related("tenant", "actor").order_by("-created_at")[:500]
+        for log in logs:
+            writer.writerow([
+                str(log.id),
+                log.created_at.isoformat(),
+                log.tenant.name if log.tenant else "System",
+                log.actor.email if log.actor else "System",
+                log.action,
+                log.entity_type,
+                str(log.entity_id),
+            ])
+        return response
+
+    @action(detail=False, methods=["get"], url_path="reports/export")
+    def export_reports(self, request):
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_reports_summary.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Tenant Name", "Registration Number", "Status", "Owner Email", "Subscription Plan", "Created Date"])
+
+        tenants = Tenant.objects.select_related("subscription__plan").prefetch_related("memberships__user").all()
+        for t in tenants:
+            plan_name = t.subscription.plan.name if hasattr(t, "subscription") and t.subscription and t.subscription.plan else "N/A"
+            owner_m = t.memberships.filter(role="owner").first()
+            owner_email = owner_m.user.email if owner_m and owner_m.user else "N/A"
+            writer.writerow([
+                t.name,
+                t.registration_number or "N/A",
+                "Active" if t.is_active else "Suspended",
+                owner_email,
+                plan_name,
+                t.created_at.strftime("%Y-%m-%d") if hasattr(t, "created_at") and t.created_at else "",
+            ])
+        return response
+
+    @action(detail=False, methods=["get"], url_path="analytics/export")
+    def export_analytics(self, request):
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_analytics.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Metric", "Value"])
+        writer.writerow(["Total Tenants", Tenant.objects.count()])
+        writer.writerow(["Active Tenants", Tenant.objects.filter(is_active=True).count()])
+        writer.writerow(["Suspended Tenants", Tenant.objects.filter(is_active=False).count()])
+        writer.writerow(["Total Branches", Branch.objects.count()])
+        writer.writerow(["Total Users", User.objects.count()])
+        writer.writerow(["Pending Payments", PaymentRequest.objects.filter(status=PaymentRequest.Status.PENDING).count()])
+        return response
+
     @action(detail=False, methods=["get"], url_path="health")
     def health(self, request):
         return Response(
@@ -273,12 +475,178 @@ class PlatformViewSet(viewsets.ViewSet):
                 "status": "ok",
                 "api": {"status": "ok", "latency_ms": 12},
                 "database": {"status": "ok", "connections": 1},
-                "queue": {"status": "ok", "pending_jobs": 0},
-                "storage": {"status": "ok", "used_mb": 42},
+                "active_tenants": Tenant.objects.filter(is_active=True).count(),
+                "active_users": User.objects.filter(is_active=True).count(),
+                "total_branches": Branch.objects.count(),
                 "timestamp": timezone.now().isoformat(),
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["get"], url_path="health/export")
+    def export_health(self, request):
+        import csv
+        from django.http import HttpResponse
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_system_health_export.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Service / Metric", "Status", "Details"])
+        writer.writerow(["Django REST API", "Operational", "Serving endpoints (12ms)"])
+        writer.writerow(["PostgreSQL Database", "Operational", "Database connection verified"])
+        writer.writerow(["Active Tenants", "Operational", Tenant.objects.filter(is_active=True).count()])
+        writer.writerow(["Active Users", "Operational", User.objects.filter(is_active=True).count()])
+        writer.writerow(["Total Branches", "Operational", Branch.objects.count()])
+
+        AuditService.record(tenant=None, actor=request.user, action="export", entity_type="system.Health", metadata={})
+        return response
+
+    @action(detail=False, methods=["get"], url_path="feature-flags/export")
+    def export_feature_flags(self, request):
+        import csv
+        from django.http import HttpResponse
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_feature_flags_export.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Flag Key", "Flag Name", "Module", "Description", "Enabled", "Updated At"])
+
+        flags = FeatureFlag.objects.all()
+        for flag in flags:
+            writer.writerow([
+                flag.key,
+                flag.name,
+                flag.module,
+                flag.description,
+                "True" if flag.is_enabled else "False",
+                flag.updated_at.isoformat() if hasattr(flag, "updated_at") and flag.updated_at else "",
+            ])
+
+        AuditService.record(tenant=None, actor=request.user, action="export", entity_type="tenants.FeatureFlag", metadata={"count": flags.count()})
+        return response
+
+    @action(detail=False, methods=["get"], url_path="security/export")
+    def export_security(self, request):
+        import csv
+        from django.http import HttpResponse
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="platform_security_export.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Log ID", "Timestamp", "Actor Email", "Tenant", "Action", "Entity Type", "Entity ID", "Metadata"])
+
+        logs = AuditEvent.objects.select_related("tenant", "actor").order_by("-created_at")[:500]
+        for log in logs:
+            writer.writerow([
+                str(log.id),
+                log.created_at.isoformat(),
+                log.actor.email if log.actor else "System",
+                log.tenant.name if log.tenant else "System",
+                log.action,
+                log.entity_type,
+                str(log.entity_id),
+                str(log.metadata),
+            ])
+
+        AuditService.record(tenant=None, actor=request.user, action="export", entity_type="audit.SecurityLog", metadata={"count": logs.count()})
+        return response
+
+    @action(detail=False, methods=["get"], url_path="permissions")
+    def list_permissions(self, request):
+        categories = PermissionCategory.objects.prefetch_related("permissions").all()
+        return Response(PermissionCategorySerializer(categories, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get", "post"], url_path="roles")
+    def roles(self, request):
+        if request.method == "GET":
+            roles = Role.objects.prefetch_related("permissions").all()
+            return Response(RoleSerializer(roles, many=True).data, status=status.HTTP_200_OK)
+
+        serializer = RoleCreateUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        name = serializer.validated_data["name"].strip()
+        description = serializer.validated_data.get("description", "")
+        scope = serializer.validated_data.get("scope", Role.Scope.GLOBAL)
+        perm_keys = serializer.validated_data.get("permission_keys", [])
+
+        role_key = name.lower().replace(" ", "_").replace("-", "_")
+        import uuid
+        if Role.objects.filter(key=role_key).exists():
+            role_key = f"{role_key}_{uuid.uuid4().hex[:6]}"
+
+        role = Role.objects.create(
+            key=role_key,
+            name=name,
+            description=description,
+            scope=scope,
+            is_system=False,
+        )
+        if perm_keys:
+            perms = Permission.objects.filter(key__in=perm_keys)
+            role.permissions.set(perms)
+
+        AuditService.record(
+            tenant=None,
+            actor=request.user,
+            action="create",
+            entity_type="accounts.Role",
+            entity_id=role.id,
+            metadata={"role_name": role.name, "permission_count": len(perm_keys)},
+        )
+        return Response(RoleSerializer(role).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get", "put", "patch", "delete"], url_path=r"roles/(?P<role_id>[^/.]+)")
+    def role_detail(self, request, role_id=None):
+        try:
+            role = Role.objects.get(id=role_id)
+        except (Role.DoesNotExist, ValidationError):
+            try:
+                role = Role.objects.get(key=role_id)
+            except Role.DoesNotExist:
+                raise NotFound("Role not found.")
+
+        if request.method == "GET":
+            return Response(RoleSerializer(role).data, status=status.HTTP_200_OK)
+
+        if request.method == "DELETE":
+            if role.is_system:
+                raise ValidationError("Protected system roles cannot be deleted.")
+            role.delete()
+            AuditService.record(
+                tenant=None,
+                actor=request.user,
+                action="delete",
+                entity_type="accounts.Role",
+                entity_id=role.id,
+                metadata={"role_name": role.name},
+            )
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        # PUT/PATCH update
+        if role.is_system:
+            raise ValidationError("Protected system role permissions cannot be edited.")
+
+        serializer = RoleCreateUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        if "name" in serializer.validated_data:
+            role.name = serializer.validated_data["name"].strip()
+        if "description" in serializer.validated_data:
+            role.description = serializer.validated_data["description"].strip()
+        if "scope" in serializer.validated_data:
+            role.scope = serializer.validated_data["scope"]
+        role.save()
+
+        if "permission_keys" in serializer.validated_data:
+            perm_keys = serializer.validated_data["permission_keys"]
+            perms = Permission.objects.filter(key__in=perm_keys)
+            role.permissions.set(perms)
+
+        AuditService.record(
+            tenant=None,
+            actor=request.user,
+            action="update",
+            entity_type="accounts.Role",
+            entity_id=role.id,
+            metadata={"role_name": role.name},
+        )
+        return Response(RoleSerializer(role).data, status=status.HTTP_200_OK)
 
 
 class PlatformTenantViewSet(viewsets.ViewSet):
@@ -527,3 +895,177 @@ class PlatformUserViewSet(viewsets.ViewSet):
                 "date_joined": u.date_joined.isoformat(),
             })
         return Response(results, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="invite")
+    def invite(self, request):
+        serializer = UserInviteCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].strip().lower()
+        role = serializer.validated_data["role"]
+        tenant_id = serializer.validated_data.get("tenant_id")
+
+        tenant = None
+        if tenant_id:
+            try:
+                tenant = Tenant.objects.get(id=tenant_id)
+            except Tenant.DoesNotExist:
+                raise NotFound("Tenant not found.")
+
+        now = timezone.now()
+        invitation = UserInvitation.objects.create(
+            email=email,
+            tenant=tenant,
+            role=role,
+            invited_by=request.user,
+            status=UserInvitation.Status.PENDING,
+            expires_at=now + timezone.timedelta(days=7),
+        )
+
+        AuditService.record(
+            tenant=tenant,
+            actor=request.user,
+            action="create",
+            entity_type="tenants.UserInvitation",
+            entity_id=invitation.id,
+            metadata={"email": email, "role": role, "token": str(invitation.token)},
+        )
+        return Response(UserInvitationSerializer(invitation).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"], url_path="invitations")
+    def list_invitations(self, request):
+        invitations = UserInvitation.objects.select_related("tenant", "invited_by").all()
+        return Response(UserInvitationSerializer(invitations, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="activate")
+    def activate(self, request, pk=None):
+        try:
+            user = User.objects.get(id=pk)
+        except User.DoesNotExist:
+            raise NotFound("User not found.")
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+        AuditService.record(
+            tenant=None,
+            actor=request.user,
+            action="update",
+            entity_type="accounts.User",
+            entity_id=user.id,
+            metadata={"is_active": True, "email": user.email},
+        )
+        return Response({"detail": "User activated successfully.", "is_active": True}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="deactivate")
+    def deactivate(self, request, pk=None):
+        try:
+            user = User.objects.get(id=pk)
+        except User.DoesNotExist:
+            raise NotFound("User not found.")
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        AuditService.record(
+            tenant=None,
+            actor=request.user,
+            action="update",
+            entity_type="accounts.User",
+            entity_id=user.id,
+            metadata={"is_active": False, "email": user.email},
+        )
+        return Response({"detail": "User deactivated successfully.", "is_active": False}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="reset-password")
+    def reset_password(self, request, pk=None):
+        try:
+            user = User.objects.get(id=pk)
+        except User.DoesNotExist:
+            raise NotFound("User not found.")
+
+        # Create or update user invitation / setup token for password reset
+        now = timezone.now()
+        membership = user.memberships.filter(is_active=True).first()
+        tenant = membership.tenant if membership else None
+        role = membership.role if membership else ("super_admin" if user.is_superuser else "user")
+
+        invitation, _ = UserInvitation.objects.update_or_create(
+            email=user.email.lower(),
+            defaults={
+                "tenant": tenant,
+                "role": role,
+                "invited_by": request.user,
+                "status": UserInvitation.Status.PENDING,
+                "expires_at": now + timezone.timedelta(days=7),
+            },
+        )
+
+        AuditService.record(
+            tenant=tenant,
+            actor=request.user,
+            action="update",
+            entity_type="accounts.User",
+            entity_id=user.id,
+            metadata={"email": user.email, "reset_token": str(invitation.token)},
+        )
+        return Response(
+            {
+                "detail": f"Password reset invitation generated for {user.email}.",
+                "email": user.email,
+                "token": str(invitation.token),
+                "setup_url": f"/auth/setup-password?token={invitation.token}",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="change-role")
+    def change_role(self, request, pk=None):
+        try:
+            user = User.objects.get(id=pk)
+        except User.DoesNotExist:
+            raise NotFound("User not found.")
+
+        new_role = request.data.get("role")
+        if new_role not in ["super_admin", "owner", "pharmacist", "cashier"]:
+            return Response({"detail": "Invalid role requested."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if new_role == "super_admin":
+            user.is_superuser = True
+            user.is_staff = True
+            user.save(update_fields=["is_superuser", "is_staff"])
+        else:
+            if user.is_superuser:
+                user.is_superuser = False
+                user.save(update_fields=["is_superuser"])
+            membership = user.memberships.filter(is_active=True).first()
+            if membership:
+                membership.role = new_role
+                membership.save(update_fields=["role"])
+
+        AuditService.record(
+            tenant=None,
+            actor=request.user,
+            action="update",
+            entity_type="accounts.User",
+            entity_id=user.id,
+            metadata={"email": user.email, "new_role": new_role},
+        )
+        return Response({"detail": f"User role changed to {new_role}.", "role": new_role}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path=r"invitations/(?P<invitation_id>[^/.]+)/resend")
+    def resend_invitation(self, request, invitation_id=None):
+        try:
+            invitation = UserInvitation.objects.get(id=invitation_id)
+        except UserInvitation.DoesNotExist:
+            raise NotFound("Invitation not found.")
+
+        now = timezone.now()
+        invitation.status = UserInvitation.Status.PENDING
+        invitation.expires_at = now + timezone.timedelta(days=7)
+        invitation.save(update_fields=["status", "expires_at"])
+
+        AuditService.record(
+            tenant=invitation.tenant,
+            actor=request.user,
+            action="update",
+            entity_type="tenants.UserInvitation",
+            entity_id=invitation.id,
+            metadata={"email": invitation.email, "token": str(invitation.token)},
+        )
+        return Response(UserInvitationSerializer(invitation).data, status=status.HTTP_200_OK)

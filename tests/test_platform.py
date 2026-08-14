@@ -37,13 +37,15 @@ class TestPlatformSuperAdmin:
                 "has_backups": True,
             },
         )
-        self.subscription = TenantSubscription.objects.create(
+        self.subscription, _ = TenantSubscription.objects.update_or_create(
             tenant=self.tenant,
-            plan=self.plan,
-            status=TenantSubscription.Status.ACTIVE,
-            billing_cycle=TenantSubscription.BillingCycle.MONTHLY,
-            starts_at=timezone.now(),
-            expires_at=timezone.now() + timedelta(days=30),
+            defaults={
+                "plan": self.plan,
+                "status": TenantSubscription.Status.ACTIVE,
+                "billing_cycle": TenantSubscription.BillingCycle.MONTHLY,
+                "starts_at": timezone.now(),
+                "expires_at": timezone.now() + timedelta(days=30),
+            },
         )
         self.payment_request = PaymentRequest.objects.create(
             tenant=self.tenant,

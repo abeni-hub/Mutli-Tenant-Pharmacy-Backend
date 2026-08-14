@@ -11,7 +11,7 @@ class AuditEvent(UUIDModel):
         LOGIN = "login", "Login"
 
     tenant = models.ForeignKey(
-        "tenants.Tenant", on_delete=models.PROTECT, related_name="audit_events"
+        "tenants.Tenant", null=True, blank=True, on_delete=models.SET_NULL, related_name="audit_events"
     )
     actor = models.ForeignKey(
         "accounts.User", null=True, blank=True, on_delete=models.SET_NULL

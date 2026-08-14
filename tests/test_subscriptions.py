@@ -122,37 +122,43 @@ class TestSubscriptionSystem:
 
     def test_05_limit_enforcement(self):
         # Attach Starter subscription (max_users=3)
-        sub = TenantSubscription.objects.create(
+        sub, _ = TenantSubscription.objects.update_or_create(
             tenant=self.tenant,
-            plan=self.starter_plan,
-            status=TenantSubscription.Status.ACTIVE,
-            billing_cycle=TenantSubscription.BillingCycle.MONTHLY,
-            starts_at=timezone.now(),
-            expires_at=timezone.now() + timedelta(days=30),
+            defaults={
+                "plan": self.starter_plan,
+                "status": TenantSubscription.Status.ACTIVE,
+                "billing_cycle": TenantSubscription.BillingCycle.MONTHLY,
+                "starts_at": timezone.now(),
+                "expires_at": timezone.now() + timedelta(days=30),
+            },
         )
+        self.tenant.refresh_from_db()
 
         # Current user count is 1 (owner)
         assert SubscriptionService.check_user_limit(self.tenant) is True
 
-        # Add 2 more users (total = 3)
+        # Add 2 more users (total = 3, max_users = 3 limit reached)
         u2 = User.objects.create_user(email="u2@abeni.test", password="Pass123!Password")
         u3 = User.objects.create_user(email="u3@abeni.test", password="Pass123!Password")
         Membership.objects.create(tenant=self.tenant, user=u2, role=Membership.Role.CASHIER)
         Membership.objects.create(tenant=self.tenant, user=u3, role=Membership.Role.PHARMACIST)
 
-        # 3 users reached limit
+        # 3 users reached max_users limit of 3
         assert SubscriptionService.check_user_limit(self.tenant) is False
 
     def test_06_feature_permission_gates(self):
         # Attach Starter sub (has_sms=False, has_reports=False)
-        sub = TenantSubscription.objects.create(
+        sub, _ = TenantSubscription.objects.update_or_create(
             tenant=self.tenant,
-            plan=self.starter_plan,
-            status=TenantSubscription.Status.ACTIVE,
-            billing_cycle=TenantSubscription.BillingCycle.MONTHLY,
-            starts_at=timezone.now(),
-            expires_at=timezone.now() + timedelta(days=30),
+            defaults={
+                "plan": self.starter_plan,
+                "status": TenantSubscription.Status.ACTIVE,
+                "billing_cycle": TenantSubscription.BillingCycle.MONTHLY,
+                "starts_at": timezone.now(),
+                "expires_at": timezone.now() + timedelta(days=30),
+            },
         )
+        self.tenant.refresh_from_db()
 
         class DummyRequest:
             user = self.owner
@@ -167,20 +173,24 @@ class TestSubscriptionSystem:
         # Upgrade sub to Pro (has_sms=True, has_reports=True)
         sub.plan = self.pro_plan
         sub.save()
+        self.tenant.refresh_from_db()
 
         assert perm_sms.has_permission(DummyRequest(), None) is True
         assert perm_reports.has_permission(DummyRequest(), None) is True
 
     def test_07_expiration_warning_notifications(self):
         # Create subscription expiring in ~2.5 days
-        sub = TenantSubscription.objects.create(
+        sub, _ = TenantSubscription.objects.update_or_create(
             tenant=self.tenant,
-            plan=self.pro_plan,
-            status=TenantSubscription.Status.ACTIVE,
-            billing_cycle=TenantSubscription.BillingCycle.MONTHLY,
-            starts_at=timezone.now() - timedelta(days=28),
-            expires_at=timezone.now() + timedelta(days=2, hours=12),
+            defaults={
+                "plan": self.pro_plan,
+                "status": TenantSubscription.Status.ACTIVE,
+                "billing_cycle": TenantSubscription.BillingCycle.MONTHLY,
+                "starts_at": timezone.now() - timedelta(days=28),
+                "expires_at": timezone.now() + timedelta(days=2, hours=12),
+            },
         )
+        self.tenant.refresh_from_db()
 
         created_notifs = SubscriptionService.process_expiration_notifications()
         assert len(created_notifs) == 1

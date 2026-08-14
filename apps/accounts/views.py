@@ -214,11 +214,102 @@ class LoginHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = ("success",)
     search_fields = ("email_attempted", "ip_address")
     ordering_fields = ("login_at",)
-    ordering = ("-login_at",)
-
     def get_queryset(self):
         user = self.request.user
         qs = LoginHistory.objects.select_related("user", "tenant")
         if user.is_superuser:
             return qs
         return qs.filter(user=user)
+
+
+# ── Password Setup / Invitation Activation ──────────────────────────────────
+
+class SetupPasswordView(APIView):
+    """
+    POST /auth/setup-password/
+
+    Validates one-time invitation/password-setup token, sets user's password using Django hash,
+    activates account, and accepts the invitation.
+    """
+    permission_classes = (AllowAny,)
+
+    def post(self, request: Request) -> Response:
+        token_str = request.data.get("token")
+        new_password = request.data.get("new_password") or request.data.get("password")
+
+        if not token_str or not new_password:
+            return Response(
+                {"detail": "Both token and new_password are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {"detail": "Password must be at least 8 characters long."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.utils import timezone
+        from apps.tenants.models import UserInvitation, Membership, Tenant
+        from apps.accounts.models import User
+        from apps.audit.services import AuditService
+
+        invitation = UserInvitation.objects.filter(token=token_str).first()
+        if not invitation:
+            return Response(
+                {"detail": "Invalid or expired setup token."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if invitation.status == UserInvitation.Status.ACCEPTED:
+            return Response(
+                {"detail": "This setup token has already been used."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if invitation.expires_at and invitation.expires_at < timezone.now():
+            invitation.status = UserInvitation.Status.EXPIRED
+            invitation.save(update_fields=["status"])
+            return Response(
+                {"detail": "This setup token has expired."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Get or create user
+        email = invitation.email.lower().strip()
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            user = User.objects.create_user(
+                email=email,
+                password=new_password,
+                first_name="Owner" if invitation.role == "owner" else "User",
+            )
+        else:
+            user.set_password(new_password)
+            user.is_active = True
+            user.save()
+
+        # Update membership if tenant is assigned
+        if invitation.tenant:
+            Membership.objects.update_or_create(
+                tenant=invitation.tenant,
+                user=user,
+                defaults={"role": invitation.role, "is_active": True},
+            )
+
+        invitation.status = UserInvitation.Status.ACCEPTED
+        invitation.save(update_fields=["status"])
+
+        AuditService.record(
+            tenant=invitation.tenant,
+            actor=user,
+            action="update",
+            entity_type="accounts.User",
+            entity_id=user.id,
+            metadata={"email": user.email, "setup_completed": True},
+        )
+
+        return Response(
+            {"detail": "Password successfully set. Your account is now active."},
+            status=status.HTTP_200_OK,
+        )

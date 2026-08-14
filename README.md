@@ -133,12 +133,10 @@ POST - http://localhost:8000/api/v1/inventory/batches/stock-in/
 ![alt text](image-9.png)
 http://localhost:8000/api/v1/inventory/items/
 
-
-
-
 Sales API
 http://localhost:8000/api/v1/sales/
 ![alt text](image-12.png)
+
 ## Phase 7: Reports & Analytics
 
 The `apps.reports` app provides real-time dashboard analytics and financial reporting:
@@ -150,8 +148,54 @@ The `apps.reports` app provides real-time dashboard analytics and financial repo
 - `GET /api/v1/reports/inventory-valuation/` — Inventory asset valuation & stock stats
 - `GET /api/v1/reports/charts/` — Formatted time-series chart data
 
-
 Dashbaord
 ![alt text](image-14.png)
 
 For full request and response payload documentation (including Product creation, Stock In, FIFO Stock Out, Stock Adjustment, Sales Checkout, Sale Cancellation, Item Refunds, and Reports), see [API_REFERENCE.md](file:///d:/Abeni%20Nest/Multi-Tenant/API_REFERENCE.md).
+
+/-----/
+Super Admin
+↓
+Create Tenant
+↓
+Enter Tenant Admin email
+↓
+Backend creates Tenant + Tenant Admin account
+↓
+System generates secure temporary password
+↓
+Send email with:
+• Login email
+• Temporary password
+• Login URL
+↓
+Tenant Admin logs in
+↓
+System detects temporary password
+↓
+Force password change
+↓
+Temporary password invalidated
+↓
+Account activated
+↓
+Tenant Admin gets tenant-scoped dashboard
+
+temporaryPassword = true
+↓
+/change-password
+↓
+New password
+↓
+temporaryPassword = false
+↓
+Account activated
+Welcome to [Platform]
+
+Your account has been created.
+
+Login: admin@tenant.com
+Temporary Password: **\*\*\*\***
+Login URL: https://your-platform.com/login
+
+You will be required to change your password when you first log in.

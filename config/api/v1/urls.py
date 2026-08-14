@@ -10,6 +10,7 @@ from apps.accounts.views import (
     PasswordResetConfirmView,
     PasswordResetRequestView,
     RegistrationViewSet,
+    SetupPasswordView,
 )
 from apps.catalog.views import ProductViewSet
 from apps.purchases.views import GoodsReceiptViewSet, PurchaseOrderViewSet, SupplierViewSet
@@ -82,9 +83,11 @@ urlpatterns = [
     path("auth/token/refresh", TokenRefreshView.as_view(), name="token-refresh"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token-refresh-slash"),
 
-    # Password reset
+    # Password reset & setup
     path("auth/password/reset/", PasswordResetRequestView.as_view(), name="password-reset-request"),
     path("auth/password/confirm/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
+    path("auth/setup-password/", SetupPasswordView.as_view(), name="auth-setup-password"),
+    path("auth/setup-password", SetupPasswordView.as_view(), name="auth-setup-password-noslash"),
 
     # Router-based endpoints
     # Support no-trailing-slash for router-registered auth/me and tenants

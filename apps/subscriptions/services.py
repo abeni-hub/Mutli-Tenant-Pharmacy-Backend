@@ -120,11 +120,15 @@ class SubscriptionService:
             sub.expires_at = new_expires_at
             sub.save()
 
-        # Update payment request
+        # Update payment request and reactivate tenant
         req.status = PaymentRequest.Status.APPROVED
         req.reviewed_by = reviewer
         req.reviewed_at = now
         req.save()
+
+        if not req.tenant.is_active:
+            req.tenant.is_active = True
+            req.tenant.save(update_fields=["is_active"])
 
         AuditService.record(
             tenant=req.tenant,
