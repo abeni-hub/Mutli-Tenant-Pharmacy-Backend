@@ -14,7 +14,7 @@ class AuditService:
     @staticmethod
     def record(
         *,
-        tenant: Tenant,
+        tenant: Tenant | None = None,
         actor: User | None,
         action: str,
         entity_type: str,

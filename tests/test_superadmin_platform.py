@@ -2,6 +2,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
+from apps.audit.models import AuditEvent
 from apps.subscriptions.models import PaymentRequest, SubscriptionPlan, TenantSubscription
 from apps.tenants.models import Membership, Tenant
 from apps.tenants.services import TenantCreateData, TenantService
@@ -164,3 +165,128 @@ class TestSuperAdminPlatformIntegration:
 
             res_analytics = self.client.get("/api/v1/platform/analytics/")
             assert res_analytics.status_code == 403
+
+    def test_05_auth_me_superadmin_identity(self):
+        self.client.force_authenticate(user=self.superadmin)
+        res = self.client.get("/api/v1/auth/me/")
+        assert res.status_code == 200
+        assert res.data["email"] == "superadmin_test@abeni.test"
+        assert res.data["is_superuser"] is True
+        assert res.data["is_staff"] is True
+        assert res.data["role"] == "super_admin"
+
+    def test_06_feature_flag_toggle_and_audit_logging(self):
+        self.client.force_authenticate(user=self.superadmin)
+
+        # 1. Fetch flags
+        res_flags = self.client.get("/api/v1/platform/feature-flags/")
+        assert res_flags.status_code == 200
+        assert "feature_flags" in res_flags.data
+
+        # 2. Toggle flag
+        res_toggle = self.client.post("/api/v1/platform/feature-flags/reports/toggle/")
+        assert res_toggle.status_code == 200
+        assert "is_enabled" in res_toggle.data
+
+        # 3. Assert Audit log recorded
+        assert AuditEvent.objects.filter(entity_type="tenants.FeatureFlag", action="update").exists()
+
+    def test_07_user_invitation_creation(self):
+        self.client.force_authenticate(user=self.superadmin)
+
+        res_invite = self.client.post(
+            "/api/v1/platform/users/invite/",
+            {"email": "invited_test@abeni.test", "role": "pharmacist", "tenant_id": str(self.tenant.id)},
+            format="json",
+        )
+        assert res_invite.status_code == 201
+        assert res_invite.data["email"] == "invited_test@abeni.test"
+        assert res_invite.data["role"] == "pharmacist"
+        assert AuditEvent.objects.filter(entity_type="tenants.UserInvitation", action="create").exists()
+
+    def test_08_reports_export_csv(self):
+        self.client.force_authenticate(user=self.superadmin)
+
+        res_export = self.client.get("/api/v1/platform/reports/export/")
+        assert res_export.status_code == 200
+        assert res_export["Content-Type"] == "text/csv"
+        assert "attachment; filename=" in res_export["Content-Disposition"]
+        assert b"Tenant Name,Registration Number,Status" in res_export.content
+
+    def test_09_suspended_tenants_kpi_consistency(self):
+        self.client.force_authenticate(user=self.superadmin)
+
+        # Suspend a tenant
+        self.tenant.is_active = False
+        self.tenant.save()
+
+        # Query analytics API
+        res_analytics = self.client.get("/api/v1/platform/analytics/")
+        assert res_analytics.status_code == 200
+        api_suspended_count = res_analytics.data["totals"]["inactive_tenant_count"]
+
+        # Query DB directly
+        db_suspended_count = Tenant.objects.filter(is_active=False).count()
+
+        assert api_suspended_count == db_suspended_count
+
+    def test_10_user_activate_deactivate_and_role_change(self):
+        self.client.force_authenticate(user=self.superadmin)
+
+        # 1. Deactivate user
+        res_deactivate = self.client.post(f"/api/v1/platform/users/{self.pharmacist.id}/deactivate/")
+        assert res_deactivate.status_code == 200
+        assert res_deactivate.data["is_active"] is False
+        self.pharmacist.refresh_from_db()
+        assert self.pharmacist.is_active is False
+
+        # 2. Activate user
+        res_activate = self.client.post(f"/api/v1/platform/users/{self.pharmacist.id}/activate/")
+        assert res_activate.status_code == 200
+        assert res_activate.data["is_active"] is True
+        self.pharmacist.refresh_from_db()
+        assert self.pharmacist.is_active is True
+
+        # 3. Change role
+        res_role = self.client.post(
+            f"/api/v1/platform/users/{self.pharmacist.id}/change-role/",
+            {"role": "cashier"},
+            format="json",
+        )
+        assert res_role.status_code == 200
+        membership = self.pharmacist.memberships.filter(is_active=True).first()
+        assert membership.role == "cashier"
+
+    def test_11_user_password_reset_and_setup_flow(self):
+        self.client.force_authenticate(user=self.superadmin)
+
+        # 1. Super admin triggers password reset
+        res_reset = self.client.post(f"/api/v1/platform/users/{self.pharmacist.id}/reset-password/")
+        assert res_reset.status_code == 200
+        assert "token" in res_reset.data
+        token = res_reset.data["token"]
+
+        # 2. User sets new password using token
+        self.client.logout()
+        res_setup = self.client.post(
+            "/api/v1/auth/setup-password/",
+            {"token": token, "new_password": "NewSecretPassword123!"},
+            format="json",
+        )
+        assert res_setup.status_code == 200
+        self.pharmacist.refresh_from_db()
+        assert self.pharmacist.check_password("NewSecretPassword123!") is True
+
+    def test_12_audit_log_export_and_filtering(self):
+        self.client.force_authenticate(user=self.superadmin)
+
+        # Audit logs filter
+        res_filter = self.client.get("/api/v1/platform/audit-logs/?action=create")
+        assert res_filter.status_code == 200
+        assert "results" in res_filter.data
+
+        # Audit logs CSV export
+        res_export = self.client.get("/api/v1/platform/audit-logs/export/")
+        assert res_export.status_code == 200
+        assert res_export["Content-Type"] == "text/csv"
+        assert b"Log ID,Created At,Tenant,Actor Email,Action" in res_export.content
