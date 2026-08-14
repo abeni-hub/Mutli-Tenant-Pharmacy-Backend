@@ -3,6 +3,7 @@ Audit service — records structured audit events for all tenant operations.
 """
 from __future__ import annotations
 
+import uuid
 from uuid import UUID
 
 from apps.accounts.models import User
@@ -18,7 +19,7 @@ class AuditService:
         actor: User | None,
         action: str,
         entity_type: str,
-        entity_id: UUID,
+        entity_id: UUID | str | None = None,
         metadata: dict,
         ip_address: str | None = None,
     ) -> AuditEvent:
@@ -30,10 +31,15 @@ class AuditService:
             actor:       The user who performed the action (None for system events).
             action:      One of AuditEvent.Action values.
             entity_type: Dotted model name, e.g. "tenants.Tenant".
-            entity_id:   UUID primary key of the affected object.
+            entity_id:   UUID primary key of the affected object (optional, auto-generated if None).
             metadata:    Arbitrary JSON-serialisable context dict.
             ip_address:  Optional originating IP (captured from request).
         """
+        if entity_id is None:
+            entity_id = uuid.uuid4()
+        elif isinstance(entity_id, str):
+            entity_id = UUID(entity_id)
+
         return AuditEvent.objects.create(
             tenant=tenant,
             actor=actor,

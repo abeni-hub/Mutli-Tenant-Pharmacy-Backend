@@ -174,8 +174,6 @@ class RegistrationSerializer(serializers.Serializer):
         return User.objects.create_user(**validated_data)
 
 
-# ── Login history ─────────────────────────────────────────────────────────────
-
 class LoginHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = LoginHistory
@@ -189,3 +187,58 @@ class LoginHistorySerializer(serializers.ModelSerializer):
             "login_at",
         )
         read_only_fields = fields
+
+
+# ── RBAC Serializers ──────────────────────────────────────────────────────────
+
+from apps.accounts.models import Permission, PermissionCategory, Role, UserRole
+
+
+class PermissionSerializer(serializers.ModelSerializer):
+    category_key = serializers.CharField(source="category.key", read_only=True)
+
+    class Meta:
+        model = Permission
+        fields = ("id", "key", "name", "description", "category_key", "scope", "is_system")
+
+
+class PermissionCategorySerializer(serializers.ModelSerializer):
+    permissions = PermissionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = PermissionCategory
+        fields = ("id", "key", "name", "description", "order", "permissions")
+
+
+class RoleSerializer(serializers.ModelSerializer):
+    permissions = PermissionSerializer(many=True, read_only=True)
+    permission_keys = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Role
+        fields = (
+            "id",
+            "key",
+            "name",
+            "description",
+            "scope",
+            "tenant",
+            "is_system",
+            "permissions",
+            "permission_keys",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_permission_keys(self, obj: Role) -> list[str]:
+        return list(obj.permissions.values_list("key", flat=True))
+
+
+class RoleCreateUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=150)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    scope = serializers.ChoiceField(choices=Role.Scope.choices, default=Role.Scope.GLOBAL)
+    permission_keys = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+
