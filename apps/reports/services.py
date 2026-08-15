@@ -85,6 +85,27 @@ class ReportService:
             expiry_date__lte=near_expiry_threshold,
         ).count()
 
+        # Suppliers, Purchases & Customers counts
+        from apps.purchases.models import Supplier
+        supplier_count = Supplier.unscoped.filter(tenant=tenant).count()
+        pending_purchases_count = PurchaseOrder.unscoped.filter(
+            tenant=tenant, status=PurchaseOrder.Status.DRAFT
+        ).count()
+        customer_count = (
+            completed_sales.exclude(customer_name="")
+            .values("customer_name")
+            .distinct()
+            .count()
+        )
+        inv_val_agg = StockBatch.unscoped.filter(
+            tenant=tenant, is_active=True, quantity__gt=0, expiry_date__gt=today
+        ).aggregate(
+            cost_val=Sum(
+                ExpressionWrapper(F("quantity") * F("unit_price"), output_field=DecimalField())
+            )
+        )
+        inventory_value = inv_val_agg["cost_val"] or Decimal("0.00")
+
         return {
             "today": {
                 "revenue": str(today_agg["rev"] or Decimal("0.00")),
@@ -111,6 +132,10 @@ class ReportService:
                 "expired_batches_count": expired_batches_count,
                 "near_expiry_batches": near_expiry_batches_count,
                 "near_expiry_batches_count": near_expiry_batches_count,
+                "inventory_value": str(inventory_value),
+                "supplier_count": supplier_count,
+                "customer_count": customer_count,
+                "pending_purchases_count": pending_purchases_count,
             },
         }
 
