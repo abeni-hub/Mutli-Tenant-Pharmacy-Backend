@@ -35,7 +35,9 @@ class DashboardViewSet(viewsets.ViewSet):
     def owner(self, request):
         tenant = self._get_tenant(request)
         data = ReportService.get_overview(tenant=tenant, limit=8)
-        data["recent_activities"] = data.pop("recent_activity", [])
+        activity = data.get("recent_activity", [])
+        data["recent_activities"] = activity
+        data["recent_activity"] = activity
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="pharmacist")

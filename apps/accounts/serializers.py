@@ -18,9 +18,9 @@ from apps.accounts.models import LoginHistory, User
 
 class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
-    role = serializers.SerializerMethodField(
-        help_text="Role within the current tenant (from X-Tenant-ID header)"
-    )
+    role = serializers.SerializerMethodField()
+    tenant_id = serializers.SerializerMethodField()
+    tenant_slug = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -37,6 +37,8 @@ class UserSerializer(serializers.ModelSerializer):
             "date_joined",
             "last_login_ip",
             "role",
+            "tenant_id",
+            "tenant_slug",
         )
         read_only_fields = ("id", "email", "is_active", "is_superuser", "is_staff", "date_joined", "last_login_ip")
 
@@ -57,6 +59,25 @@ class UserSerializer(serializers.ModelSerializer):
         # Fallback when X-Tenant-ID is not provided (e.g. login endpoint response before tenant selection)
         primary_membership = obj.memberships.filter(is_active=True).first()
         return primary_membership.role if primary_membership else None
+
+    def get_tenant_id(self, obj: User) -> str | None:
+        request = self.context.get("request")
+        tenant_id = getattr(request, "tenant_id", None) if request else None
+        if tenant_id:
+            return str(tenant_id)
+        primary = obj.memberships.filter(is_active=True).first()
+        return str(primary.tenant_id) if primary else None
+
+    def get_tenant_slug(self, obj: User) -> str | None:
+        request = self.context.get("request")
+        tenant_id = getattr(request, "tenant_id", None) if request else None
+        if tenant_id:
+            from apps.tenants.models import Tenant
+            t = Tenant.objects.filter(id=tenant_id).first()
+            if t:
+                return t.slug
+        primary = obj.memberships.select_related("tenant").filter(is_active=True).first()
+        return primary.tenant.slug if (primary and primary.tenant) else None
 
 
 
