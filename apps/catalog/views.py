@@ -69,3 +69,25 @@ class ProductViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["get"], url_path="categories")
+    def categories(self, request):
+        tenant_id = getattr(request, "tenant_id", None)
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+        queryset = self.get_queryset()
+        categories = list(queryset.exclude(category="").values_list("category", flat=True).distinct())
+        default_categories = [
+            "Antibiotics",
+            "Analgesics",
+            "Antihypertensives",
+            "Vitamins",
+            "Diabetes",
+            "Cardiovascular",
+            "Respiratory",
+            "Dermatology",
+            "Gastrointestinal",
+            "Supplements",
+        ]
+        all_categories = sorted(list(set([c for c in categories if c] + default_categories)))
+        return Response(all_categories, status=status.HTTP_200_OK)

@@ -148,16 +148,18 @@ SIMPLE_JWT = {
     "TOKEN_OBTAIN_SERIALIZER": "apps.accounts.serializers.PharmacyTokenObtainPairSerializer",
 }
 
-# ── Email (password reset) ───────────────────────────────────────────────────
+# ── Email & MailHog Integration ──────────────────────────────────────────────
 EMAIL_BACKEND = os.environ.get(
-    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
+    "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
 )
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
-EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True").lower() == "true"
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "127.0.0.1")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "1025"))
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "False").lower() == "true"
+EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False").lower() == "true"
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@abeni-pharmacy.com")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@abeni.test")
+EMAIL_FAIL_SILENTLY = True
 
 # ── Auth security settings ───────────────────────────────────────────────────
 PASSWORD_RESET_TIMEOUT_MINUTES = int(os.environ.get("PASSWORD_RESET_TIMEOUT_MINUTES", "60"))

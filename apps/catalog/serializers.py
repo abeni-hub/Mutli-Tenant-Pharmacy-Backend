@@ -65,7 +65,7 @@ class ProductSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        tenant_id = self.context.get("tenant_id")
+        tenant_id = self.context.get("tenant_id") or validated_data.get("tenant_id")
         if tenant_id:
             validated_data["tenant_id"] = tenant_id
         if "status" in validated_data and "is_active" not in validated_data:

@@ -152,6 +152,48 @@ class PasswordResetConfirmView(APIView):
         )
 
 
+class PasswordChangeView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request: Request) -> Response:
+        from apps.accounts.serializers import PasswordChangeSerializer
+        from apps.audit.services import AuditService
+
+        serializer = PasswordChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        current_password = serializer.validated_data.get("current_password", "")
+        new_password = serializer.validated_data["new_password"]
+
+        if user.must_change_password or (current_password and user.check_password(current_password)):
+            user.set_password(new_password)
+            user.must_change_password = False
+            user.save(update_fields=["password", "must_change_password"])
+
+            AuditService.record(
+                tenant=None,
+                actor=user,
+                action="update",
+                entity_type="accounts.User",
+                entity_id=user.id,
+                metadata={"action": "password_changed", "must_change_password": False},
+            )
+
+            return Response(
+                {
+                    "message": "Password changed successfully.",
+                    "user": UserSerializer(user, context={"request": request}).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {"detail": "Invalid current password."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 # ── Profile (me) ──────────────────────────────────────────────────────────────
 
 class MeViewSet(viewsets.GenericViewSet):
@@ -313,3 +355,196 @@ class SetupPasswordView(APIView):
             {"detail": "Password successfully set. Your account is now active."},
             status=status.HTTP_200_OK,
         )
+
+
+class PermissionCatalogViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = (IsAuthenticated,)
+
+    def list(self, request: Request) -> Response:
+        from apps.accounts.models import PermissionCategory, Permission
+        from apps.accounts.serializers import PermissionCategorySerializer
+        from django.db.models import Prefetch
+
+        user = request.user
+        if not user.is_superuser:
+            categories = PermissionCategory.objects.prefetch_related(
+                Prefetch(
+                    "permissions",
+                    queryset=Permission.objects.filter(scope=Permission.Scope.TENANT).order_by("key"),
+                )
+            ).all()
+        else:
+            categories = PermissionCategory.objects.prefetch_related("permissions").all()
+
+        serialized = PermissionCategorySerializer(categories, many=True).data
+        if not user.is_superuser:
+            serialized = [cat for cat in serialized if cat.get("permissions") and len(cat["permissions"]) > 0]
+
+        return Response(serialized)
+
+
+class TenantRoleViewSet(viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated,)
+
+    def get_serializer_class(self):
+        from apps.accounts.serializers import RoleSerializer
+        return RoleSerializer
+
+    def get_queryset(self):
+        from apps.accounts.models import Role
+        from django.db.models import Q
+
+        user = self.request.user
+        tenant_id = getattr(self.request, "tenant_id", None)
+        if not tenant_id and "tenant_id" in self.request.query_params:
+            tenant_id = self.request.query_params.get("tenant_id")
+
+        if user.is_superuser and not tenant_id:
+            return Role.objects.filter(scope=Role.Scope.GLOBAL).prefetch_related("permissions")
+
+        if tenant_id:
+            return Role.objects.filter(
+                scope=Role.Scope.TENANT
+            ).filter(
+                Q(is_system=True) | Q(tenant_id=tenant_id)
+            ).prefetch_related("permissions")
+
+        return Role.objects.filter(scope=Role.Scope.TENANT, is_system=True).prefetch_related("permissions")
+
+    def _validate_permission_keys(self, perm_keys, is_super):
+        from apps.accounts.models import Permission
+        from rest_framework.exceptions import PermissionDenied
+
+        if not perm_keys:
+            return []
+
+        perms = Permission.objects.filter(key__in=perm_keys)
+        if len(perms) != len(set(perm_keys)):
+            raise PermissionDenied("One or more invalid permission keys submitted.")
+
+        if not is_super:
+            global_perms = [p.key for p in perms if p.scope == Permission.Scope.GLOBAL]
+            if global_perms:
+                raise PermissionDenied(
+                    f"Permission Denied: Cannot assign GLOBAL scope permissions ({', '.join(global_perms)}) to a tenant role."
+                )
+        return perms
+
+    def create(self, request: Request) -> Response:
+        import uuid
+        from apps.accounts.models import Role
+        from apps.accounts.serializers import RoleCreateUpdateSerializer, RoleSerializer
+        from apps.audit.services import AuditService
+        from rest_framework.exceptions import ValidationError, PermissionDenied
+
+        serializer = RoleCreateUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        name = serializer.validated_data["name"].strip()
+        description = serializer.validated_data.get("description", "")
+        perm_keys = serializer.validated_data.get("permission_keys", [])
+
+        tenant_id = getattr(request, "tenant_id", None)
+        is_super = request.user.is_superuser
+
+        if not is_super:
+            scope = Role.Scope.TENANT
+            if not tenant_id:
+                raise ValidationError("Tenant context required to create a custom role.")
+        else:
+            scope = serializer.validated_data.get("scope", Role.Scope.GLOBAL)
+
+        perms = self._validate_permission_keys(perm_keys, is_super)
+
+        role_key = f"{name.lower().replace(' ', '_')}_{uuid.uuid4().hex[:6]}"
+
+        role = Role.objects.create(
+            key=role_key,
+            name=name,
+            description=description,
+            scope=scope,
+            tenant_id=tenant_id if scope == Role.Scope.TENANT else None,
+            is_system=False,
+        )
+
+        role.permissions.set(perms)
+
+        AuditService.record(
+            tenant=role.tenant,
+            actor=request.user,
+            action="create",
+            entity_type="accounts.Role",
+            entity_id=role.id,
+            metadata={"role_name": role.name, "permission_count": len(perms)},
+        )
+        return Response(RoleSerializer(role).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request: Request, *args, **kwargs) -> Response:
+        return self._perform_update(request, partial=False, *args, **kwargs)
+
+    def partial_update(self, request: Request, *args, **kwargs) -> Response:
+        return self._perform_update(request, partial=True, *args, **kwargs)
+
+    def _perform_update(self, request: Request, partial: bool, *args, **kwargs) -> Response:
+        from apps.accounts.serializers import RoleCreateUpdateSerializer, RoleSerializer
+        from apps.audit.services import AuditService
+        from rest_framework.exceptions import PermissionDenied, ValidationError
+
+        role = self.get_object()
+        is_super = request.user.is_superuser
+        tenant_id = getattr(request, "tenant_id", None)
+
+        if not is_super:
+            if role.is_system or role.scope == Role.Scope.GLOBAL or str(role.tenant_id) != str(tenant_id):
+                raise PermissionDenied("Permission Denied: Cannot modify global, protected system, or foreign tenant roles.")
+
+        serializer = RoleCreateUpdateSerializer(data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        if "name" in serializer.validated_data:
+            role.name = serializer.validated_data["name"].strip()
+        if "description" in serializer.validated_data:
+            role.description = serializer.validated_data["description"].strip()
+
+        if "permission_keys" in serializer.validated_data:
+            perm_keys = serializer.validated_data["permission_keys"]
+            perms = self._validate_permission_keys(perm_keys, is_super)
+            role.permissions.set(perms)
+
+        role.save()
+
+        AuditService.record(
+            tenant=role.tenant,
+            actor=request.user,
+            action="update",
+            entity_type="accounts.Role",
+            entity_id=role.id,
+            metadata={"role_name": role.name},
+        )
+        return Response(RoleSerializer(role).data, status=status.HTTP_200_OK)
+
+    def destroy(self, request: Request, *args, **kwargs) -> Response:
+        from apps.audit.services import AuditService
+        from rest_framework.exceptions import PermissionDenied, ValidationError
+
+        role = self.get_object()
+        is_super = request.user.is_superuser
+        tenant_id = getattr(request, "tenant_id", None)
+
+        if role.is_system:
+            raise ValidationError("System roles are protected and cannot be deleted.")
+
+        if not is_super:
+            if role.scope == Role.Scope.GLOBAL or str(role.tenant_id) != str(tenant_id):
+                raise PermissionDenied("Permission Denied: Cannot delete global or foreign tenant roles.")
+
+        AuditService.record(
+            tenant=role.tenant,
+            actor=request.user,
+            action="delete",
+            entity_type="accounts.Role",
+            entity_id=role.id,
+            metadata={"role_name": role.name},
+        )
+        role.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

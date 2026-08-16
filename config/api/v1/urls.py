@@ -7,23 +7,30 @@ from apps.accounts.views import (
     LoginView,
     LogoutView,
     MeViewSet,
+    PasswordChangeView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
+    PermissionCatalogViewSet,
     RegistrationViewSet,
     SetupPasswordView,
+    TenantRoleViewSet,
 )
 from apps.catalog.views import ProductViewSet
 from apps.purchases.views import GoodsReceiptViewSet, PurchaseOrderViewSet, SupplierViewSet
-from apps.tenants.views import PlatformBranchViewSet, PlatformPaymentViewSet, PlatformTenantViewSet, PlatformUserViewSet, PlatformViewSet, TenantContextViewSet, TenantViewSet
+from apps.tenants.views import PlatformBranchViewSet, PlatformPaymentViewSet, PlatformTenantViewSet, PlatformUserViewSet, PlatformViewSet, TenantContextViewSet, TenantUserViewSet, TenantViewSet, UserInvitationViewSet
 
 router = DefaultRouter()
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# ── Auth & RBAC ───────────────────────────────────────────────────────────────
 router.register("auth/register", RegistrationViewSet, basename="registration")
 router.register("auth/me", MeViewSet, basename="me")
 router.register("auth/login-history", LoginHistoryViewSet, basename="login-history")
+router.register("permissions", PermissionCatalogViewSet, basename="permissions")
+router.register("roles", TenantRoleViewSet, basename="roles")
 
 # ── Tenants ───────────────────────────────────────────────────────────────────
+router.register("tenants/invitations", UserInvitationViewSet, basename="tenant-invitation")
+router.register("tenants/users", TenantUserViewSet, basename="tenant-user")
 router.register("tenants", TenantViewSet, basename="tenant")
 router.register("tenant-context", TenantContextViewSet, basename="tenant-context")
 router.register("platform/tenants", PlatformTenantViewSet, basename="platform-tenant")
@@ -88,6 +95,8 @@ urlpatterns = [
     path("auth/password/confirm/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
     path("auth/setup-password/", SetupPasswordView.as_view(), name="auth-setup-password"),
     path("auth/setup-password", SetupPasswordView.as_view(), name="auth-setup-password-noslash"),
+    path("auth/change-password/", PasswordChangeView.as_view(), name="auth-change-password"),
+    path("auth/change-password", PasswordChangeView.as_view(), name="auth-change-password-noslash"),
 
     # Router-based endpoints
     # Support no-trailing-slash for router-registered auth/me and tenants
