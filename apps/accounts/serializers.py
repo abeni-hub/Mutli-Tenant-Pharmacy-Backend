@@ -21,6 +21,7 @@ class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     tenant_id = serializers.SerializerMethodField()
     tenant_slug = serializers.SerializerMethodField()
+    permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -34,13 +35,42 @@ class UserSerializer(serializers.ModelSerializer):
             "is_active",
             "is_superuser",
             "is_staff",
+            "must_change_password",
             "date_joined",
             "last_login_ip",
             "role",
             "tenant_id",
             "tenant_slug",
+            "permissions",
         )
         read_only_fields = ("id", "email", "is_active", "is_superuser", "is_staff", "date_joined", "last_login_ip")
+
+    def get_permissions(self, obj: User) -> list[str]:
+        from apps.accounts.models import Permission, Role
+        from apps.tenants.models import Membership
+
+        if obj.is_superuser:
+            return list(Permission.objects.values_list("key", flat=True))
+
+        request = self.context.get("request")
+        tenant_id = getattr(request, "tenant_id", None) if request else None
+
+        if tenant_id:
+            membership = obj.memberships.filter(tenant_id=tenant_id, is_active=True).first()
+        else:
+            membership = obj.memberships.filter(is_active=True).first()
+
+        if not membership or not membership.role:
+            return []
+
+        if membership.role == Membership.Role.OWNER or membership.role == "owner":
+            return list(Permission.objects.filter(scope=Permission.Scope.TENANT).values_list("key", flat=True))
+
+        role_obj = Role.objects.filter(key=membership.role).prefetch_related("permissions").first()
+        if role_obj:
+            return list(role_obj.permissions.values_list("key", flat=True))
+
+        return []
 
     def get_role(self, obj: User) -> str | None:
         """Return the user's role in the current tenant, or primary role fallback."""
@@ -262,4 +292,16 @@ class RoleCreateUpdateSerializer(serializers.Serializer):
     permission_keys = serializers.ListField(
         child=serializers.CharField(), required=False, default=list
     )
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True, required=False, allow_blank=True, default="")
+    new_password = serializers.CharField(write_only=True, min_length=8)
+    confirm_password = serializers.CharField(write_only=True, min_length=8)
+
+    def validate(self, attrs: dict) -> dict:
+        if attrs["new_password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+        return attrs
+
 

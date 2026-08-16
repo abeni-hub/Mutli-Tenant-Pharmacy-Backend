@@ -122,5 +122,5 @@ class UserInvitationSerializer(serializers.ModelSerializer):
 
 class UserInviteCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    role = serializers.ChoiceField(choices=Membership.Role.choices, default=Membership.Role.PHARMACIST)
+    role = serializers.CharField(max_length=150, default="pharmacist")
     tenant_id = serializers.UUIDField(required=False, allow_null=True)

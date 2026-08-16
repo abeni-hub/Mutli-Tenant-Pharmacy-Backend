@@ -660,15 +660,26 @@ class PlatformTenantViewSet(viewsets.ViewSet):
         return Response(TenantSerializer(tenants, many=True).data, status=status.HTTP_200_OK)
 
     def create(self, request):
+        import secrets
         serializer = PlatformTenantCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         owner = None
+        temp_password = f"TempPass{secrets.token_hex(4)}!"
         owner_email = serializer.validated_data.get("owner_email")
+        
         if owner_email:
             owner = User.objects.filter(email__iexact=owner_email).first()
             if owner is None:
-                owner = User.objects.create_user(email=owner_email, password="TempPassword123!")
+                owner = User.objects.create_user(
+                    email=owner_email,
+                    password=temp_password,
+                    first_name=serializer.validated_data.get("owner_first_name", ""),
+                    last_name=serializer.validated_data.get("owner_last_name", ""),
+                    phone_number=serializer.validated_data.get("owner_phone", ""),
+                )
+            owner.must_change_password = True
+            owner.save(update_fields=["must_change_password"])
 
         tenant = TenantService.create_for_super_admin(
             created_by=request.user,
@@ -678,7 +689,20 @@ class PlatformTenantViewSet(viewsets.ViewSet):
             ),
             owner=owner,
         )
-        return Response(TenantSerializer(tenant).data, status=status.HTTP_201_CREATED)
+
+        res_data = TenantSerializer(tenant).data
+        if owner:
+            from apps.accounts.email_service import EmailService
+            EmailService.send_tenant_welcome_email(
+                to_email=owner.email,
+                tenant_name=tenant.name,
+                temporary_password=temp_password,
+            )
+            res_data["admin_email"] = owner.email
+            res_data["temporary_password"] = temp_password
+            res_data["must_change_password"] = True
+
+        return Response(res_data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="suspend")
     def suspend(self, request, pk=None):
@@ -1069,3 +1093,185 @@ class PlatformUserViewSet(viewsets.ViewSet):
             metadata={"email": invitation.email, "token": str(invitation.token)},
         )
         return Response(UserInvitationSerializer(invitation).data, status=status.HTTP_200_OK)
+
+
+class UserInvitationViewSet(viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated, TenantMembershipPermission)
+    serializer_class = UserInvitationSerializer
+
+    def get_queryset(self):
+        tenant_id = getattr(self.request, "tenant_id", None)
+        if not tenant_id:
+            return UserInvitation.objects.none()
+        return UserInvitation.objects.filter(tenant_id=tenant_id).select_related("tenant", "invited_by")
+
+    def create(self, request):
+        serializer = UserInviteCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].strip().lower()
+        role = serializer.validated_data["role"]
+
+        tenant_id = getattr(request, "tenant_id", None)
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+
+        try:
+            tenant = Tenant.objects.get(id=tenant_id)
+        except Tenant.DoesNotExist:
+            raise NotFound("Tenant not found.")
+
+        if role == Membership.Role.SUPER_ADMIN or role == "super_admin":
+            raise ValidationError("Tenant Admins cannot assign Super Admin role.")
+
+        from apps.accounts.models import Role
+        from django.db.models import Q
+
+        if role not in [r.value for r in Membership.Role]:
+            role_obj = Role.objects.filter(
+                Q(key=role) & Q(scope=Role.Scope.TENANT) & (Q(is_system=True) | Q(tenant_id=tenant_id))
+            ).first()
+            if not role_obj:
+                raise ValidationError(f"Invalid role '{role}' for this tenant.")
+
+        now = timezone.now()
+        invitation = UserInvitation.objects.create(
+            email=email,
+            tenant=tenant,
+            role=role,
+            invited_by=request.user,
+            status=UserInvitation.Status.PENDING,
+            expires_at=now + timezone.timedelta(days=7),
+        )
+
+        AuditService.record(
+            tenant=tenant,
+            actor=request.user,
+            action="create",
+            entity_type="tenants.UserInvitation",
+            entity_id=invitation.id,
+            metadata={"email": email, "role": role, "token": str(invitation.token)},
+        )
+
+        from apps.accounts.email_service import EmailService
+        EmailService.send_user_invitation_email(
+            to_email=email,
+            tenant_name=tenant.name,
+            role=role,
+            token=str(invitation.token),
+        )
+
+        return Response(UserInvitationSerializer(invitation).data, status=status.HTTP_201_CREATED)
+
+
+class TenantUserViewSet(viewsets.ViewSet):
+    permission_classes = (IsAuthenticated, TenantMembershipPermission)
+
+    def _get_tenant_id(self, request):
+        tenant_id = getattr(request, "tenant_id", None)
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+        return tenant_id
+
+    def list(self, request):
+        tenant_id = self._get_tenant_id(request)
+        memberships = Membership.objects.filter(tenant_id=tenant_id).select_related("user", "tenant").order_by("-joined_at", "user__email")
+        
+        results = []
+        for m in memberships:
+            u = m.user
+            results.append({
+                "id": str(u.id),
+                "membership_id": str(m.id),
+                "email": u.email,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "full_name": u.full_name or u.email,
+                "phone_number": u.phone_number,
+                "role": m.role,
+                "is_active": m.is_active and u.is_active,
+                "joined_at": m.joined_at.isoformat() if m.joined_at else u.date_joined.isoformat(),
+            })
+        return Response(results, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["patch"], url_path="role")
+    def update_role(self, request, pk=None):
+        from apps.accounts.models import Role
+        from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError
+        from django.db.models import Q
+
+        tenant_id = self._get_tenant_id(request)
+        new_role = request.data.get("role")
+        if not new_role:
+            raise ValidationError("Role is required.")
+
+        try:
+            membership = Membership.objects.get(user_id=pk, tenant_id=tenant_id)
+        except Membership.DoesNotExist:
+            raise NotFound("User membership not found in this tenant.")
+
+        if new_role == Membership.Role.SUPER_ADMIN or new_role == "super_admin":
+            raise PermissionDenied("Permission Denied: Cannot assign Super Admin role to tenant user.")
+
+        # Verify role is valid for this tenant
+        role_obj = Role.objects.filter(
+            Q(key=new_role) & Q(scope=Role.Scope.TENANT) & (Q(is_system=True) | Q(tenant_id=tenant_id))
+        ).first()
+
+        # If role key is a standard enum choice (owner, pharmacist, cashier) allow, otherwise check Role model
+        if not role_obj and new_role not in [r.value for r in Membership.Role]:
+            raise PermissionDenied("Permission Denied: Invalid role or role belongs to another scope/tenant.")
+
+        membership.role = new_role
+        membership.save(update_fields=["role"])
+
+        AuditService.record(
+            tenant_id=tenant_id,
+            actor=request.user,
+            action="update",
+            entity_type="tenants.Membership",
+            entity_id=membership.id,
+            metadata={"user_id": str(pk), "new_role": new_role},
+        )
+        return Response({"id": str(pk), "role": membership.role}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="activate")
+    def activate(self, request, pk=None):
+        tenant_id = self._get_tenant_id(request)
+        try:
+            membership = Membership.objects.get(user_id=pk, tenant_id=tenant_id)
+        except Membership.DoesNotExist:
+            raise NotFound("User membership not found in this tenant.")
+
+        membership.is_active = True
+        membership.save(update_fields=["is_active"])
+
+        AuditService.record(
+            tenant_id=tenant_id,
+            actor=request.user,
+            action="update",
+            entity_type="tenants.Membership",
+            entity_id=membership.id,
+            metadata={"user_id": str(pk), "action": "activated"},
+        )
+        return Response({"id": str(pk), "is_active": True}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="deactivate")
+    def deactivate(self, request, pk=None):
+        tenant_id = self._get_tenant_id(request)
+        try:
+            membership = Membership.objects.get(user_id=pk, tenant_id=tenant_id)
+        except Membership.DoesNotExist:
+            raise NotFound("User membership not found in this tenant.")
+
+        membership.is_active = False
+        membership.save(update_fields=["is_active"])
+
+        AuditService.record(
+            tenant_id=tenant_id,
+            actor=request.user,
+            action="update",
+            entity_type="tenants.Membership",
+            entity_id=membership.id,
+            metadata={"user_id": str(pk), "action": "deactivated"},
+        )
+        return Response({"id": str(pk), "is_active": False}, status=status.HTTP_200_OK)
