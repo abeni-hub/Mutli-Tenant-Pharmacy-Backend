@@ -2,6 +2,9 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from django.utils import timezone
+from datetime import timedelta
+from apps.inventory.models import StockBatch
 from apps.catalog.models import Product
 
 
@@ -72,7 +75,28 @@ class ProductSerializer(serializers.ModelSerializer):
             validated_data["is_active"] = validated_data["status"] != "inactive"
         elif "is_active" in validated_data and "status" not in validated_data:
             validated_data["status"] = "active" if validated_data["is_active"] else "inactive"
-        return Product.objects.create(**validated_data)
+        product = Product.objects.create(**validated_data)
+
+        # Automatically synchronize product into inventory StockBatch
+        batch_no = product.batch_number or f"BATCH-{product.sku or str(product.id)[:8].upper()}"
+        expiry = product.expiry_date or (timezone.now().date() + timedelta(days=365))
+        qty = product.available_stock or 0
+
+        StockBatch.unscoped.get_or_create(
+            tenant_id=tenant_id,
+            product=product,
+            batch_number=batch_no,
+            defaults={
+                "quantity": qty,
+                "initial_quantity": qty,
+                "unit_price": product.purchase_price,
+                "selling_price": product.selling_price,
+                "expiry_date": expiry,
+                "stock_status": "in_stock" if qty > 0 else "out_of_stock",
+                "is_active": True,
+            },
+        )
+        return product
 
     def update(self, instance, validated_data):
         if "status" in validated_data and "is_active" not in validated_data:

@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from apps.catalog.models import Product
-from apps.sales.models import Sale, SaleItem, SaleRefund
+from apps.sales.models import Prescription, PrescriptionItem, Sale, SaleItem, SaleRefund
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
@@ -249,3 +249,63 @@ class SaleRefundInputSerializer(serializers.Serializer):
     item_id = serializers.UUIDField()
     quantity = serializers.IntegerField(min_value=1)
     reason = serializers.CharField(required=True, min_length=3)
+
+
+class PrescriptionItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PrescriptionItem
+        fields = (
+            "id",
+            "product",
+            "product_name",
+            "dosage",
+            "frequency",
+            "duration",
+            "quantity",
+            "dispensed_quantity",
+        )
+
+
+class PrescriptionSerializer(serializers.ModelSerializer):
+    items = PrescriptionItemSerializer(many=True, required=False)
+
+    class Meta:
+        model = Prescription
+        fields = (
+            "id",
+            "rx_number",
+            "customer_name",
+            "customer_id",
+            "doctor_name",
+            "doctor_license",
+            "date",
+            "expiry_date",
+            "branch",
+            "status",
+            "notes",
+            "items",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def create(self, validated_data):
+        items_data = validated_data.pop("items", [])
+        tenant_id = self.context.get("tenant_id") or validated_data.get("tenant_id")
+        if tenant_id:
+            validated_data["tenant_id"] = tenant_id
+
+        if not validated_data.get("rx_number"):
+            import uuid
+            validated_data["rx_number"] = f"RX-{uuid.uuid4().hex[:8].upper()}"
+
+        prescription = Prescription.objects.create(**validated_data)
+
+        for item_data in items_data:
+            PrescriptionItem.objects.create(
+                tenant_id=tenant_id,
+                prescription=prescription,
+                **item_data
+            )
+
+        return prescription
