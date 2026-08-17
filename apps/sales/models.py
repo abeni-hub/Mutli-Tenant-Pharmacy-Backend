@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 from core.models import TenantScopedModel
 
@@ -159,3 +160,57 @@ class SaleRefund(TenantScopedModel):
 
     def __str__(self) -> str:
         return f"Refund {self.refund_number} for {self.sale.invoice_number} ({self.refund_amount})"
+
+
+class Prescription(TenantScopedModel):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        PENDING_REVIEW = "pending_review", "Pending Review"
+        VERIFIED = "verified", "Verified"
+        APPROVED = "approved", "Approved"
+        PARTIALLY_DISPENSED = "partially_dispensed", "Partially Dispensed"
+        FULLY_DISPENSED = "fully_dispensed", "Fully Dispensed"
+        EXPIRED = "expired", "Expired"
+        CANCELLED = "cancelled", "Cancelled"
+        REJECTED = "rejected", "Rejected"
+
+    rx_number = models.CharField(max_length=100, db_index=True)
+    customer_name = models.CharField(max_length=200)
+    customer_id = models.CharField(max_length=100, blank=True)
+    doctor_name = models.CharField(max_length=200)
+    doctor_license = models.CharField(max_length=100, blank=True)
+    date = models.DateField(default=timezone.now)
+    expiry_date = models.DateField(null=True, blank=True)
+    branch = models.CharField(max_length=200, blank=True)
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.PENDING_REVIEW)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="created_prescriptions"
+    )
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"Rx {self.rx_number} - {self.customer_name}"
+
+
+class PrescriptionItem(TenantScopedModel):
+    prescription = models.ForeignKey(
+        Prescription, on_delete=models.CASCADE, related_name="items"
+    )
+    product_name = models.CharField(max_length=200)
+    product = models.ForeignKey(
+        "catalog.Product", on_delete=models.SET_NULL, null=True, blank=True, related_name="prescription_items"
+    )
+    dosage = models.CharField(max_length=100, blank=True)
+    frequency = models.CharField(max_length=100, blank=True)
+    duration = models.CharField(max_length=100, blank=True)
+    quantity = models.PositiveIntegerField(default=1)
+    dispensed_quantity = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ("created_at",)
+
+    def __str__(self) -> str:
+        return f"{self.product_name} ({self.prescription.rx_number})"

@@ -67,8 +67,9 @@ router.register("purchases", PurchaseOrderViewSet, basename="purchase")
 router.register("goods-receipts", GoodsReceiptViewSet, basename="goods-receipt")
 
 # ── Sales ─────────────────────────────────────────────────────────────────────
-from apps.sales.views import SaleViewSet
+from apps.sales.views import PrescriptionViewSet, SaleViewSet
 
+router.register("prescriptions", PrescriptionViewSet, basename="prescription")
 router.register("sales", SaleViewSet, basename="sale")
 
 # ── Reports & Analytics ───────────────────────────────────────────────────────

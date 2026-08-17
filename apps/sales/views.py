@@ -4,8 +4,9 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.sales.models import Sale
+from apps.sales.models import Prescription, Sale
 from apps.sales.serializers import (
+    PrescriptionSerializer,
     SaleCancelSerializer,
     SaleCreateSerializer,
     SaleDetailSerializer,
@@ -252,3 +253,29 @@ class SaleViewSet(viewsets.ModelViewSet):
             end_date=end_date,
         )
         return Response(report_data, status=status.HTTP_200_OK)
+
+
+class PrescriptionViewSet(viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated, TenantMembershipPermission, HasActiveSubscription)
+    serializer_class = PrescriptionSerializer
+    filterset_fields = ("status", "branch")
+    search_fields = ("rx_number", "customer_name", "doctor_name", "notes")
+    ordering_fields = ("created_at", "date")
+    ordering = ("-created_at",)
+
+    def get_queryset(self):
+        tenant_id = getattr(self.request, "tenant_id", None)
+        if not tenant_id:
+            return Prescription.unscoped.none()
+        return Prescription.unscoped.prefetch_related("items").filter(tenant_id=tenant_id)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["tenant_id"] = getattr(self.request, "tenant_id", None)
+        return context
+
+    def perform_create(self, serializer):
+        tenant_id = getattr(self.request, "tenant_id", None)
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+        serializer.save(tenant_id=tenant_id, created_by=self.request.user)

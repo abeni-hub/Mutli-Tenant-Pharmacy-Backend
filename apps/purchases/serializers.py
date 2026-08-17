@@ -7,11 +7,14 @@ from apps.purchases.models import GoodsReceipt, PurchaseOrder, PurchaseOrderItem
 
 
 class SupplierSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source="company_name", required=False)
+
     class Meta:
         model = Supplier
         fields = (
             "id",
             "code",
+            "name",
             "company_name",
             "contact_person",
             "email",
