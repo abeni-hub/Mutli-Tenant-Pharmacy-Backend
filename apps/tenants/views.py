@@ -953,6 +953,15 @@ class PlatformUserViewSet(viewsets.ViewSet):
             entity_id=invitation.id,
             metadata={"email": email, "role": role, "token": str(invitation.token)},
         )
+
+        from apps.accounts.email_service import EmailService
+        EmailService.send_user_invitation_email(
+            to_email=email,
+            tenant_name=tenant.name if tenant else "MeridianRx Platform",
+            role=role,
+            token=str(invitation.token),
+        )
+
         return Response(UserInvitationSerializer(invitation).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["get"], url_path="invitations")
@@ -1092,6 +1101,15 @@ class PlatformUserViewSet(viewsets.ViewSet):
             entity_id=invitation.id,
             metadata={"email": invitation.email, "token": str(invitation.token)},
         )
+
+        from apps.accounts.email_service import EmailService
+        EmailService.send_user_invitation_email(
+            to_email=invitation.email,
+            tenant_name=invitation.tenant.name if invitation.tenant else "MeridianRx Platform",
+            role=invitation.role,
+            token=str(invitation.token),
+        )
+
         return Response(UserInvitationSerializer(invitation).data, status=status.HTTP_200_OK)
 
 
@@ -1161,6 +1179,32 @@ class UserInvitationViewSet(viewsets.ModelViewSet):
         )
 
         return Response(UserInvitationSerializer(invitation).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="resend")
+    def resend(self, request, pk=None):
+        tenant_id = getattr(request, "tenant_id", None)
+        if not tenant_id:
+            raise ValidationError("X-Tenant-ID header is required.")
+
+        try:
+            invitation = UserInvitation.objects.get(id=pk, tenant_id=tenant_id)
+        except UserInvitation.DoesNotExist:
+            raise NotFound("Invitation not found.")
+
+        now = timezone.now()
+        invitation.status = UserInvitation.Status.PENDING
+        invitation.expires_at = now + timezone.timedelta(days=7)
+        invitation.save(update_fields=["status", "expires_at"])
+
+        from apps.accounts.email_service import EmailService
+        EmailService.send_user_invitation_email(
+            to_email=invitation.email,
+            tenant_name=invitation.tenant.name if invitation.tenant else "MeridianRx Platform",
+            role=invitation.role,
+            token=str(invitation.token),
+        )
+
+        return Response(UserInvitationSerializer(invitation).data, status=status.HTTP_200_OK)
 
 
 class TenantUserViewSet(viewsets.ViewSet):
@@ -1275,3 +1319,44 @@ class TenantUserViewSet(viewsets.ViewSet):
             metadata={"user_id": str(pk), "action": "deactivated"},
         )
         return Response({"id": str(pk), "is_active": False}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="reset-password")
+    def reset_password(self, request, pk=None):
+        tenant_id = self._get_tenant_id(request)
+        try:
+            membership = Membership.objects.get(user_id=pk, tenant_id=tenant_id)
+        except Membership.DoesNotExist:
+            raise NotFound("User membership not found in this tenant.")
+
+        u = membership.user
+        now = timezone.now()
+
+        invitation, _ = UserInvitation.objects.update_or_create(
+            email=u.email.lower(),
+            defaults={
+                "tenant": membership.tenant,
+                "role": membership.role,
+                "invited_by": request.user,
+                "status": UserInvitation.Status.PENDING,
+                "expires_at": now + timezone.timedelta(days=7),
+            },
+        )
+
+        AuditService.record(
+            tenant_id=tenant_id,
+            actor=request.user,
+            action="update",
+            entity_type="accounts.User",
+            entity_id=u.id,
+            metadata={"email": u.email, "reset_token": str(invitation.token)},
+        )
+        return Response(
+            {
+                "detail": f"Password reset invitation generated for {u.email}.",
+                "email": u.email,
+                "token": str(invitation.token),
+                "setup_url": f"/setup-password?token={invitation.token}",
+            },
+            status=status.HTTP_200_OK,
+        )
+

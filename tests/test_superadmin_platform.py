@@ -290,3 +290,44 @@ class TestSuperAdminPlatformIntegration:
         assert res_export.status_code == 200
         assert res_export["Content-Type"] == "text/csv"
         assert b"Log ID,Created At,Tenant,Actor Email,Action" in res_export.content
+
+    def test_13_super_admin_invitation_promotion_and_email_dispatch(self):
+        from django.core import mail
+        from apps.accounts.models import User
+        from apps.tenants.models import UserInvitation
+
+        self.client.force_authenticate(user=self.superadmin)
+
+        # 1. Invite super_admin
+        mail.outbox = []
+        res_invite = self.client.post(
+            "/api/v1/platform/users/invite/",
+            {"email": "new_superadmin@abeni.test", "role": "super_admin"},
+            format="json",
+        )
+        assert res_invite.status_code == 201
+        invitation_token = res_invite.data["token"]
+        assert len(mail.outbox) == 1
+        assert "new_superadmin@abeni.test" in mail.outbox[0].to
+
+        # 2. Resend invitation email
+        mail.outbox = []
+        invitation_id = res_invite.data["id"]
+        res_resend = self.client.post(f"/api/v1/platform/users/invitations/{invitation_id}/resend/")
+        assert res_resend.status_code == 200
+        assert len(mail.outbox) == 1
+
+        # 3. Setup password for super_admin invitation
+        self.client.logout()
+        res_setup = self.client.post(
+            "/api/v1/auth/setup-password/",
+            {"token": invitation_token, "new_password": "SuperSecretPass123!"},
+            format="json",
+        )
+        assert res_setup.status_code == 200
+
+        new_super_user = User.objects.get(email="new_superadmin@abeni.test")
+        assert new_super_user.is_superuser is True
+        assert new_super_user.is_staff is True
+        assert new_super_user.is_active is True
+

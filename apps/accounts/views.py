@@ -324,12 +324,18 @@ class SetupPasswordView(APIView):
             user = User.objects.create_user(
                 email=email,
                 password=new_password,
-                first_name="Owner" if invitation.role == "owner" else "User",
+                first_name="Super" if invitation.role == "super_admin" else ("Owner" if invitation.role == "owner" else "User"),
+                last_name="Admin" if invitation.role == "super_admin" else "",
             )
         else:
             user.set_password(new_password)
-            user.is_active = True
-            user.save()
+
+        user.is_active = True
+        user.must_change_password = False
+        if invitation.role == "super_admin" or invitation.role == Membership.Role.SUPER_ADMIN:
+            user.is_superuser = True
+            user.is_staff = True
+        user.save()
 
         # Update membership if tenant is assigned
         if invitation.tenant:

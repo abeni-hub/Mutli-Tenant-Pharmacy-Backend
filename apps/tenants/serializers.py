@@ -102,6 +102,7 @@ class FeatureFlagSerializer(serializers.ModelSerializer):
 class UserInvitationSerializer(serializers.ModelSerializer):
     tenant_name = serializers.CharField(source="tenant.name", read_only=True, default="")
     invited_by_email = serializers.CharField(source="invited_by.email", read_only=True)
+    setup_url = serializers.SerializerMethodField()
 
     class Meta:
         model = UserInvitation
@@ -112,12 +113,17 @@ class UserInvitationSerializer(serializers.ModelSerializer):
             "tenant_name",
             "role",
             "token",
+            "setup_url",
             "status",
             "invited_by_email",
             "expires_at",
             "created_at",
         )
-        read_only_fields = ("id", "token", "tenant_name", "invited_by_email", "created_at")
+        read_only_fields = ("id", "token", "setup_url", "tenant_name", "invited_by_email", "created_at")
+
+    def get_setup_url(self, obj: UserInvitation) -> str:
+        return f"/setup-password?token={obj.token}"
+
 
 
 class UserInviteCreateSerializer(serializers.Serializer):

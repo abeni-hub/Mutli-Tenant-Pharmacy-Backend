@@ -76,7 +76,7 @@ class UserSerializer(serializers.ModelSerializer):
         """Return the user's role in the current tenant, or primary role fallback."""
         from apps.tenants.models import Membership
 
-        if obj.is_superuser or obj.memberships.filter(role=Membership.Role.SUPER_ADMIN, is_active=True).exists():
+        if obj.is_superuser or obj.is_staff or obj.memberships.filter(role=Membership.Role.SUPER_ADMIN, is_active=True).exists():
             return "super_admin"
 
         request = self.context.get("request")
